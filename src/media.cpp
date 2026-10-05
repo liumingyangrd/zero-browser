@@ -10,7 +10,9 @@
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
+#include <mfobjects.h>
 #include <mfreadwrite.h>
+#include <objbase.h>
 
 #ifndef AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
 #define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000
@@ -18,6 +20,10 @@
 #ifndef AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY
 #define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
 #endif
+
+// MinGW 的 mfidl.h 没有声明这个导出函数（SDK 里有），符号在 mfplat 中，自带一份声明。
+extern "C" HRESULT WINAPI MFCreateMFByteStreamOnStream(
+    IStream* pStream, IMFByteStream** ppByteStream);
 
 #include <atomic>
 #include <chrono>
@@ -42,6 +48,17 @@ std::wstring U8ToWideLocal(const std::string& s) {
     if (n <= 0) return L"";
     std::wstring out((size_t)n, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), out.data(), n);
+    return out;
+}
+
+std::string WideToUtf8Local(const std::wstring& s) {
+    if (s.empty()) return "";
+    int n = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0,
+                                nullptr, nullptr);
+    if (n <= 0) return "";
+    std::string out((size_t)n, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, s.c_str(), (int)s.size(), out.data(), n,
+                        nullptr, nullptr);
     return out;
 }
 
@@ -80,8 +97,61 @@ void SafeRelease(T** p) {
     }
 }
 
-bool CreateByteStream(const std::string& url, IMFByteStream** out,
+// 自己写一个媒体缓存文件：受限环境下 MFCreateTempFile 会被拒绝，
+// 用普通 CreateFile 写到 %TEMP%\zero-browser-media（失败再退回进程目录）。
+bool WriteOwnTempFile(const std::string& bytes, std::string* path_out,
                       std::string* error) {
+    static std::atomic<unsigned> counter{0};
+    unsigned idx = counter.fetch_add(1);
+    wchar_t tmp[MAX_PATH] = {};
+    DWORD n = GetTempPathW(MAX_PATH, tmp);
+    std::wstring dir = (n > 0 && n < MAX_PATH) ? std::wstring(tmp) : std::wstring();
+    while (!dir.empty() && (dir.back() == L'\\' || dir.back() == L'/')) {
+        dir.pop_back();
+    }
+    std::wstring full;
+    if (!dir.empty()) {
+        dir += L"\\zero-browser-media";
+        CreateDirectoryW(dir.c_str(), nullptr);
+        wchar_t name[128] = {};
+        std::swprintf(name, 128, L"\\zb-%u-%u.media",
+                      (unsigned)GetCurrentProcessId(), idx);
+        full = dir + name;
+    }
+    auto open = [&](const std::wstring& path) -> HANDLE {
+        return CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    };
+    HANDLE h = full.empty() ? INVALID_HANDLE_VALUE : open(full);
+    if (h == INVALID_HANDLE_VALUE) {
+        wchar_t alt[128] = {};
+        std::swprintf(alt, 128, L"zb-media-%u-%u.media",
+                      (unsigned)GetCurrentProcessId(), idx);
+        full = alt;
+        h = open(full);
+    }
+    if (h == INVALID_HANDLE_VALUE) {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "无法创建媒体缓存文件 (Win32 %lu)",
+                      (unsigned long)GetLastError());
+        *error = buf;
+        return false;
+    }
+    DWORD written = 0;
+    BOOL ok = WriteFile(h, bytes.data(), (DWORD)bytes.size(), &written, nullptr);
+    CloseHandle(h);
+    if (!ok || written != bytes.size()) {
+        DeleteFileW(full.c_str());
+        *error = "写入媒体缓存文件失败";
+        return false;
+    }
+    if (path_out) *path_out = WideToUtf8Local(full);
+    return true;
+}
+
+bool CreateByteStream(const std::string& url, IMFByteStream** out,
+                      std::string* error, std::string* temp_path) {
     *out = nullptr;
     if (IsHttpUrl(url)) {
         FetchResult res;
@@ -90,13 +160,31 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
             *error = res.error.empty() ? "视频下载失败" : res.error;
             return false;
         }
+        // 首选 MFCreateTempFile：正常系统上最省事，也不留残留文件。
+        // 但它在受限环境里会返回 E_ACCESSDENIED（0x80070005），
+        // MinGW 的 mfplat 又没有 MFCreateMFByteStreamOnStream 的导入符号，
+        // 所以失败时改成“自己建缓存文件 + MFCreateFile”。
         IMFByteStream* stream = nullptr;
         HRESULT hr = MFCreateTempFile(MF_ACCESSMODE_READWRITE,
                                       MF_OPENMODE_DELETE_IF_EXIST,
                                       MF_FILEFLAGS_NONE, &stream);
         if (FAILED(hr) || !stream) {
-            *error = "无法创建媒体临时文件";
-            return false;
+            std::string path;
+            if (!WriteOwnTempFile(res.html, &path, error)) return false;
+            std::wstring wpath = U8ToWideLocal(path);
+            hr = MFCreateFile(MF_ACCESSMODE_READ, MF_OPENMODE_FAIL_IF_NOT_EXIST,
+                              MF_FILEFLAGS_NONE, wpath.c_str(), out);
+            if (FAILED(hr) || !*out) {
+                DeleteFileW(wpath.c_str());
+                char buf[128];
+                std::snprintf(buf, sizeof(buf),
+                              "无法打开媒体缓存文件 (0x%08lX)",
+                              (unsigned long)hr);
+                *error = buf;
+                return false;
+            }
+            if (temp_path) *temp_path = path;
+            return true;
         }
         ULONG written = 0;
         hr = stream->Write((const BYTE*)res.html.data(),
@@ -126,6 +214,8 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
 
 struct MediaPlayer::Impl {
     std::string url;
+    // 受限环境下自己创建的媒体缓存文件路径，播放器关闭时删除。
+    std::string media_temp_path;
     std::atomic<bool> stop{false};
     std::atomic<bool> playing{false};
     std::atomic<bool> ready{false};
@@ -227,11 +317,16 @@ void MediaPlayer::Impl::Run() {
     IMFSourceReader* reader = nullptr;
     std::string error;
 
-    if (!CreateByteStream(url, &stream, &error)) {
+    std::string temp_media_path;
+    if (!CreateByteStream(url, &stream, &error, &temp_media_path)) {
         MDBG("media: byte stream failed: %s\n", error.c_str());
         Fail(error);
         CoUninitialize();
         return;
+    }
+    if (!temp_media_path.empty()) {
+        std::lock_guard<std::mutex> lock(mtx);
+        media_temp_path = temp_media_path;  // Close() 时删除
     }
     MDBG("media: byte stream ok\n");
 
@@ -490,8 +585,18 @@ void MediaPlayer::Close() {
     impl_->playing = false;
     if (impl_->worker.joinable()) impl_->worker.join();
     impl_->audio.Close();
-    std::lock_guard<std::mutex> lock(impl_->mtx);
-    impl_->frame.clear();
+    std::string temp_path;
+    {
+        std::lock_guard<std::mutex> lock(impl_->mtx);
+        impl_->frame.clear();
+        temp_path = impl_->media_temp_path;
+        impl_->media_temp_path.clear();
+    }
+    // 自己创建的媒体缓存文件在这里删除，避免留下残留。
+    if (!temp_path.empty()) {
+        std::wstring wpath = U8ToWideLocal(temp_path);
+        DeleteFileW(wpath.c_str());
+    }
 }
 
 void MediaPlayer::Play() {

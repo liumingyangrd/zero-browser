@@ -3,6 +3,7 @@
 #include "common.h"
 #include "dom.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <map>
 #include <set>
@@ -55,17 +56,58 @@ struct Style {
     bool bold = false;
     bool italic = false;
     bool underline = false;
+    // 字体族（逗号分隔的候选列表，绘制时取第一个可用字体）。
+    std::string font_family = "Segoe UI";
+    // 数值字重：400 normal / 700 bold，Chromium 用 300~900。
+    int font_weight = 400;
     std::string text_align = "left";
-    float line_height = 1.45f;
+    // 未显式设置 line-height 时置 0，表示按字体的真实度量取行高（等价 normal）。
+    float line_height = 0.f;
+    std::string text_transform = "none";
+    float letter_spacing = 0.f;
     std::string flex_direction = "row";
     std::string justify_content = "flex-start";
     std::string align_items = "stretch";
+    std::string flex_wrap = "nowrap";
     std::string grid_template_columns;  // 原始 grid-template-columns 值
     std::string grid_column;            // 原始 grid-column 值
     std::string overflow = "visible";
     std::string white_space = "normal";
     int gap = 0;
     bool box_border_box = true;
+    float opacity = 1.f;
+    // box-shadow：首个阴影（Chromium 支持多个，这里取第一个）
+    bool has_shadow = false;
+    int shadow_x = 0;
+    int shadow_y = 0;
+    int shadow_blur = 0;
+    int shadow_spread = 0;
+    std::string shadow_color = "rgba(0,0,0,0.2)";
+    // background
+    std::string background_repeat = "repeat";
+    std::string background_position = "0% 0%";
+    Length background_position_x;
+    Length background_position_y;
+    bool has_background_position = false;
+    // ::before / ::after 生成内容（只保留图标/标签最常用的属性，避免递归结构）
+    struct Pseudo {
+        bool present = false;
+        bool has_content = false;
+        std::string content;
+        std::string color;
+        int font_size = 0;    // 0 = 继承
+        int font_weight = 0;  // 0 = 继承
+        std::string display;
+        Length width;
+        Length height;
+        Length margin[4];
+        Length padding[4];
+        std::string background;
+        int border_radius = 0;
+        std::string text_align;
+    };
+    Pseudo before;
+    Pseudo after;
 
     int PaddingTop() const { return Resolve(padding[0], 0, 0); }
     int PaddingRight() const { return Resolve(padding[1], 0, 0); }
@@ -452,21 +494,103 @@ inline Color ColorFromCss(const std::string& value) {
     Color c;
     std::string v = Trim(value);
     if (v.empty() || v == "none" || v == "transparent") return c;
-    if (StartsWith(Lower(v), "rgb")) {
+    std::string lv = Lower(v);
+    if (StartsWith(lv, "rgb") || StartsWith(lv, "hsl")) {
         size_t open = v.find('(');
         size_t close = v.rfind(')');
-        if (open != std::string::npos && close != std::string::npos &&
-            close > open) {
-            auto nums = SplitStr(v.substr(open + 1, close - open - 1), ',');
+        if (open == std::string::npos || close == std::string::npos ||
+            close <= open) {
+            return c;
+        }
+        std::string args = v.substr(open + 1, close - open - 1);
+        // 兼容 rgb(0 0 0 / 50%) 这种空格写法：把空格与斜杠也当分隔符
+        std::string norm = args;
+        for (char& ch : norm) {
+            if (ch == ' ' || ch == '\t' || ch == '/') ch = ',';
+        }
+        auto nums = SplitStr(norm, ',');
+        auto clamp255 = [](int x) { return x < 0 ? 0 : (x > 255 ? 255 : x); };
+        auto channel = [](const std::string& s) -> int {
+            std::string t = Trim(s);
+            if (!t.empty() && t.back() == '%') {
+                return (int)(std::atof(t.c_str()) * 255.0 / 100.0);
+            }
+            return std::atoi(t.c_str());
+        };
+        auto alpha_of = [](const std::string& s) -> uint8_t {
+            std::string t = Trim(s);
+            if (t.empty()) return 255;
+            float a = 1.f;
+            if (t.back() == '%') a = (float)(std::atof(t.c_str()) / 100.0);
+            else a = (float)std::atof(t.c_str());
+            if (a < 0.f) a = 0.f;
+            if (a > 1.f) a = 1.f;
+            return (uint8_t)(a * 255.f + 0.5f);
+        };
+        if (StartsWith(lv, "hsl")) {
             if (nums.size() >= 3) {
-                auto clamp255 = [](int x) { return x < 0 ? 0 : (x > 255 ? 255 : x); };
-                c.r = (uint8_t)clamp255(std::atoi(nums[0].c_str()));
-                c.g = (uint8_t)clamp255(std::atoi(nums[1].c_str()));
-                c.b = (uint8_t)clamp255(std::atoi(nums[2].c_str()));
+                float h = (float)std::atof(Trim(nums[0]).c_str());
+                float s = (float)std::atof(Trim(nums[1]).c_str()) / 100.f;
+                float l = (float)std::atof(Trim(nums[2]).c_str()) / 100.f;
+                if (!Trim(nums[1]).empty() && Trim(nums[1]).back() == '%') {
+                    s = (float)std::atof(Trim(nums[1]).c_str()) / 100.f;
+                }
+                if (!Trim(nums[2]).empty() && Trim(nums[2]).back() == '%') {
+                    l = (float)std::atof(Trim(nums[2]).c_str()) / 100.f;
+                }
+                h = std::fmod(h, 360.f);
+                if (h < 0) h += 360.f;
+                float cch = (1.f - std::fabs(2.f * l - 1.f)) * s;
+                float hp = h / 60.f;
+                float x = cch * (1.f - std::fabs(std::fmod(hp, 2.f) - 1.f));
+                float rr = 0, gg = 0, bb = 0;
+                if (hp < 1) { rr = cch; gg = x; }
+                else if (hp < 2) { rr = x; gg = cch; }
+                else if (hp < 3) { gg = cch; bb = x; }
+                else if (hp < 4) { gg = x; bb = cch; }
+                else if (hp < 5) { rr = x; bb = cch; }
+                else { rr = cch; bb = x; }
+                float m = l - cch / 2.f;
+                c.r = (uint8_t)clamp255((int)((rr + m) * 255.f + 0.5f));
+                c.g = (uint8_t)clamp255((int)((gg + m) * 255.f + 0.5f));
+                c.b = (uint8_t)clamp255((int)((bb + m) * 255.f + 0.5f));
+                c.a = nums.size() >= 4 ? alpha_of(nums[3]) : 255;
                 c.transparent = false;
                 return c;
             }
+            return c;
         }
+        if (nums.size() >= 3) {
+            c.r = (uint8_t)clamp255(channel(nums[0]));
+            c.g = (uint8_t)clamp255(channel(nums[1]));
+            c.b = (uint8_t)clamp255(channel(nums[2]));
+            c.a = nums.size() >= 4 ? alpha_of(nums[3]) : 255;
+            c.transparent = false;
+            return c;
+        }
+    }
+    // #RRGGBBAA / #RGBA
+    if (v[0] == '#' && (v.size() == 9 || v.size() == 5)) {
+        auto nib = [&](size_t i) -> int {
+            char x = v[i];
+            if (x >= '0' && x <= '9') return x - '0';
+            if (x >= 'a' && x <= 'f') return x - 'a' + 10;
+            if (x >= 'A' && x <= 'F') return x - 'A' + 10;
+            return 0;
+        };
+        if (v.size() == 9) {
+            c.r = (uint8_t)(nib(1) * 16 + nib(2));
+            c.g = (uint8_t)(nib(3) * 16 + nib(4));
+            c.b = (uint8_t)(nib(5) * 16 + nib(6));
+            c.a = (uint8_t)(nib(7) * 16 + nib(8));
+        } else {
+            c.r = (uint8_t)(nib(1) * 17);
+            c.g = (uint8_t)(nib(2) * 17);
+            c.b = (uint8_t)(nib(3) * 17);
+            c.a = (uint8_t)(nib(4) * 17);
+        }
+        c.transparent = (c.a == 0);
+        return c;
     }
     if (v[0] == '#' && v.size() >= 7) {
         auto hex = [&](int a, int b) -> int {
@@ -544,10 +668,75 @@ inline Color ColorFromCss(const std::string& value) {
     return c;
 }
 
+// --- CSS 自定义属性（CSS 变量）---------------------------------------------
+// 真实站点（B 站、洛谷、GitHub…）大量用 var(--x) 定义颜色/间距/尺寸，
+// 不支持它会导致颜色全部回退、间距丢失，版式与 Chromium 相差很远。
+// 做法：解析样式表时把所有 `--name: value` 收进一张表，应用声明时替换 var()。
+inline std::map<std::string, std::string>& CssVars() {
+    static std::map<std::string, std::string> vars;
+    return vars;
+}
+
+inline void CssVarsReset() { CssVars().clear(); }
+
+// 替换 value 里的 var(--name[, fallback])，支持嵌套。
+inline std::string SubstituteVars(const std::string& value) {
+    if (value.find("var(") == std::string::npos) return value;
+    std::string out;
+    size_t i = 0;
+    int guard = 0;
+    while (i < value.size() && guard++ < 128) {
+        size_t p = value.find("var(", i);
+        if (p == std::string::npos) {
+            out += value.substr(i);
+            break;
+        }
+        out += value.substr(i, p - i);
+        size_t open = p + 3;  // 指向 '('
+        int depth = 0;
+        size_t j = open;
+        bool closed = false;
+        for (; j < value.size(); ++j) {
+            if (value[j] == '(') depth++;
+            else if (value[j] == ')') {
+                depth--;
+                if (depth == 0) { closed = true; break; }
+            }
+        }
+        if (!closed) break;
+        std::string inner = value.substr(open + 1, j - open - 1);
+        size_t comma = std::string::npos;
+        int d2 = 0;
+        for (size_t k = 0; k < inner.size(); ++k) {
+            if (inner[k] == '(') d2++;
+            else if (inner[k] == ')') d2--;
+            else if (inner[k] == ',' && d2 == 0) { comma = k; break; }
+        }
+        std::string name =
+            Trim(comma == std::string::npos ? inner : inner.substr(0, comma));
+        std::string fallback =
+            comma == std::string::npos ? std::string() : Trim(inner.substr(comma + 1));
+        auto it = CssVars().find(name);
+        std::string resolved = (it != CssVars().end()) ? it->second : fallback;
+        out += SubstituteVars(resolved);
+        i = j + 1;
+    }
+    return out;
+}
+
 inline void ApplyDeclaration(Style& s, const std::string& name_raw,
                              const std::string& value_raw) {
     std::string name = Lower(Trim(name_raw));
     std::string value = Trim(value_raw);
+    // !important 只做“去标记”处理：本项目按文档顺序应用，不做完整优先级层叠。
+    if (EndsWith(Lower(value), "!important")) {
+        value = Trim(value.substr(0, value.size() - 10));
+    }
+    if (name.size() > 2 && name[0] == '-' && name[1] == '-') {
+        CssVars()[name] = value;  // 收集 CSS 变量定义
+        return;
+    }
+    value = SubstituteVars(value);
     if (name == "display") s.display = Lower(value);
     else if (name == "position") {
         std::string p = Lower(value);
@@ -712,6 +901,117 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
         else s.gap = (int)std::atof(value.c_str());
     }
     else if (name == "box-sizing") s.box_border_box = Lower(value) == "border-box";
+    else if (name == "font-family") {
+        // 取候选列表里的第一个族名（去引号）；绘制时按顺序尝试。
+        std::string v = value;
+        std::string first;
+        int depth = 0;
+        for (size_t i = 0; i < v.size(); ++i) {
+            char c = v[i];
+            if (c == '(') depth++;
+            else if (c == ')') { if (depth > 0) depth--; }
+            else if (c == ',' && depth == 0) { first = v.substr(0, i); break; }
+        }
+        if (first.empty()) first = v;
+        first = Trim(first);
+        if (first.size() >= 2 && ((first.front() == '"' && first.back() == '"') ||
+                                  (first.front() == '\'' && first.back() == '\''))) {
+            first = first.substr(1, first.size() - 2);
+        }
+        if (!first.empty() && Lower(first) != "inherit") s.font_family = first;
+    }
+    else if (name == "font-weight") {
+        std::string v = Lower(Trim(value));
+        if (v == "bold" || v == "bolder") { s.font_weight = 700; s.bold = true; }
+        else if (v == "normal" || v == "lighter") { s.font_weight = 400; s.bold = false; }
+        else {
+            int w = std::atoi(v.c_str());
+            if (w >= 100 && w <= 1000) {
+                s.font_weight = w;
+                s.bold = w >= 600;  // 600 以上用粗体近似
+            }
+        }
+    }
+    else if (name == "font") {
+        // 简写：至少识别其中的 font-size 与 font-weight，族名取最后一段
+        auto parts = SplitStr(value, ' ');
+        for (const auto& p : parts) {
+            std::string t = Lower(Trim(p));
+            if (t == "bold" || t == "bolder") { s.font_weight = 700; s.bold = true; }
+            else if (EndsWith(t, "px")) {
+                s.font_size = (int)std::atof(t.c_str());
+            }
+        }
+        size_t sp = value.rfind(' ');
+        if (sp != std::string::npos) {
+            std::string fam = Trim(value.substr(sp + 1));
+            if (!fam.empty()) ApplyDeclaration(s, "font-family", fam);
+        }
+    }
+    else if (name == "letter-spacing") {
+        if (EndsWith(value, "px")) s.letter_spacing = (float)std::atof(value.c_str());
+    }
+    else if (name == "text-transform") s.text_transform = Lower(value);
+    else if (name == "opacity") {
+        float o = (float)std::atof(value.c_str());
+        s.opacity = o < 0.f ? 0.f : (o > 1.f ? 1.f : o);
+    }
+    else if (name == "box-shadow") {
+        std::string v = Lower(value);
+        if (v != "none" && !v.empty()) {
+            // 只取第一个阴影：颜色 + 数值（x y blur spread）
+            std::string color_part;
+            size_t cp = value.find("rgb");
+            if (cp == std::string::npos) cp = value.find('#');
+            if (cp != std::string::npos) {
+                size_t close = value.find(')', cp);
+                color_part = (close == std::string::npos)
+                                 ? value.substr(cp)
+                                 : value.substr(cp, close - cp + 1);
+            }
+            std::string nums = value;
+            if (!color_part.empty()) nums = value.substr(0, cp);
+            std::vector<float> vals;
+            std::string cur;
+            for (size_t i = 0; i <= nums.size(); ++i) {
+                char ch = i < nums.size() ? nums[i] : ' ';
+                if (std::isdigit((unsigned char)ch) || ch == '-' || ch == '.') {
+                    cur.push_back(ch);
+                } else if (!cur.empty()) {
+                    vals.push_back((float)std::atof(cur.c_str()));
+                    cur.clear();
+                }
+            }
+            if (vals.size() >= 2) {
+                s.has_shadow = true;
+                s.shadow_x = (int)vals[0];
+                s.shadow_y = (int)vals[1];
+                s.shadow_blur = vals.size() >= 3 ? (int)vals[2] : 0;
+                s.shadow_spread = vals.size() >= 4 ? (int)vals[3] : 0;
+                if (!color_part.empty()) s.shadow_color = color_part;
+                else s.shadow_color = "rgba(0,0,0,0.18)";
+            }
+        }
+    }
+    else if (name == "background-repeat") s.background_repeat = Lower(value);
+    else if (name == "background-position") {
+        s.background_position = Lower(value);
+        auto parts = SplitStr(value, ' ');
+        auto setpos = [&](const std::string& tok, bool x_axis) {
+            std::string t = Lower(Trim(tok));
+            Length* dst = x_axis ? &s.background_position_x
+                                 : &s.background_position_y;
+            if (t == "center") { dst->is_auto = true; return; }
+            if (t == "left" || t == "top") { SetLength(*dst, "0"); return; }
+            if (t == "right" || t == "bottom") { SetLength(*dst, "100%"); return; }
+            SetLength(*dst, t);
+        };
+        if (parts.size() == 1) { setpos(parts[0], true); setpos(parts[0], false); }
+        else if (parts.size() >= 2) { setpos(parts[0], true); setpos(parts[1], false); }
+        s.has_background_position = true;
+    }
+    else if (name == "flex-wrap") s.flex_wrap = Lower(value);
+    else if (name == "text-overflow") { /* 由 overflow 近似处理，暂不单独实现 */ }
 }
 
 inline void ApplyStyleAttr(const Node* node, Style& style) {

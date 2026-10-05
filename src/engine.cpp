@@ -126,7 +126,7 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
 
 const char* kDefaultCss = R"CSS(
   * { box-sizing:border-box; }
-  body { margin:0; background:#ffffff; color:#111827; font-size:16px; line-height:1.5; }
+  body { margin:0; background:#ffffff; color:#111827; font-size:16px; }
   p { margin:16px 0; }
   h1 { font-size:32px; font-weight:bold; margin:20px 0 12px 0; }
   h2 { font-size:24px; font-weight:bold; margin:18px 0 10px 0; }
@@ -758,7 +758,7 @@ void TokenizeText(const std::string& text, const Style& style, bool link,
     }
 }
 
-int LineHeightOf(const Style& s);
+int LineHeightOf(const Style& s, Canvas* canvas);
 
 void CollectInline(const Node* node, Style parent,
                    const std::vector<CssRule>& rules, int container_w,
@@ -817,7 +817,7 @@ void CollectInline(const Node* node, Style parent,
         p.link = link;
         p.href = parent_href;
         p.widget = node->tag;
-        int fh = LineHeightOf(s);
+        int fh = LineHeightOf(s, nullptr);
         if (node->tag == "textarea") {
             p.widget_w = !s.width.is_auto
                              ? ResolveLength(s.width, container_w)
@@ -888,8 +888,17 @@ struct PlacedRun {
     int width = 0;
 };
 
-int LineHeightOf(const Style& s) {
-    return std::max(2, (int)std::round(s.font_size * s.line_height));
+int LineHeightOf(const Style& s, Canvas* canvas = nullptr) {
+    // line-height 未显式指定时按字体真实度量取（等价 CSS 的 normal，贴近 Chromium）。
+    if (s.line_height > 0.f) {
+        return std::max(2, (int)std::round(s.font_size * s.line_height));
+    }
+    if (canvas) {
+        int h = canvas->TextHeight(s.font_size, s.bold, s.italic, s.font_family,
+                                   s.font_weight);
+        if (h > 0) return std::max(2, h);
+    }
+    return std::max(2, (int)std::round(s.font_size * 1.32f));
 }
 
 // 把行内 pieces 排成若干行并追加到 box.runs。
@@ -899,7 +908,7 @@ int LayoutInlineInto(Box& box, const std::vector<InlinePiece>& pieces,
                      Canvas* canvas, int start_y = -1) {
     if (pieces.empty()) return 0;
     int base_y = start_y >= 0 ? start_y : box.content.y;
-    int line_height = LineHeightOf(box.style);
+    int line_height = LineHeightOf(box.style, canvas);
     int x = box.content.x;
     int y = base_y;
     int right = box.content.x + box.content.w;
@@ -1965,17 +1974,40 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
     int dx = viewport.x + box.rect.x;
     int dy = is_fixed ? viewport.y + box.rect.y
                       : viewport.y + box.rect.y - scroll_y;
+    // box-shadow：Chromium 是高斯模糊，GDI 没有模糊能力，
+    // 这里用若干层递减透明度的矩形叠出近似柔和的阴影。
+    if (box.style.has_shadow && box.rect.w > 0 && box.rect.h > 0) {
+        Color sc = ColorFromCss(box.style.shadow_color);
+        if (!sc.transparent) {
+            int blur = std::max(0, box.style.shadow_blur);
+            int spread = box.style.shadow_spread;
+            int layers = std::max(1, blur / 2 + 1);
+            for (int i = layers; i >= 1; --i) {
+                int grow = spread + (blur * i) / (layers * 2);
+                uint8_t a = (uint8_t)std::max(
+                    4, (int)(sc.a * 0.28f / (float)i + 3.0f));
+                canvas->FillRectAlpha(dx + box.style.shadow_x - grow,
+                                      dy + box.style.shadow_y - grow,
+                                      box.rect.w + grow * 2,
+                                      box.rect.h + grow * 2, sc.rgb(), a);
+            }
+        }
+    }
     Color bg = ColorFromCss(box.style.background);
-    if (!bg.transparent) {
+    if (!bg.transparent && bg.a > 0) {
         if (box.style.border_radius > 0) {
             canvas->FillRoundRect(dx, dy, box.rect.w, box.rect.h,
                                   box.style.border_radius, bg.rgb());
+        } else if (bg.a < 255) {
+            canvas->FillRectAlpha(dx, dy, box.rect.w, box.rect.h, bg.rgb(),
+                                  bg.a);
         } else {
             canvas->FillRect(dx, dy, box.rect.w, box.rect.h, bg.rgb());
         }
     }
     // background-image：默认 cover（拉伸且保持比例、居中）。真实站点里
-    // “整块背景图”远多于平铺，cover 比默认 auto 平铺更有用。
+    // “整块背景图”远多于平铺，cover 比默认 auto 平铺更有用；
+    // 显式写了 background-repeat 时按平铺处理。
     if (!box.style.background_image.empty()) {
         std::string abs = ResolveUrl(base_url, box.style.background_image);
         auto img_it = images.find(abs);
@@ -1986,23 +2018,73 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
             int ih = img->height;
             int dw = box.rect.w;
             int dh = box.rect.h;
+            const std::string& rep = box.style.background_repeat;
+            bool tiled = (rep == "repeat" || rep == "repeat-x" ||
+                          rep == "repeat-y" || rep == "round" ||
+                          rep == "space");
             if (iw > 0 && ih > 0) {
-                if (box.style.background_size == "contain") {
-                    float s = std::min((float)dw / iw, (float)dh / ih);
-                    dw = (int)(iw * s);
-                    dh = (int)(ih * s);
-                } else if (box.style.background_size != "stretch") {
-                    // cover / auto
-                    float s = std::max((float)dw / iw, (float)dh / ih);
-                    dw = (int)(iw * s);
-                    dh = (int)(ih * s);
-                }
-                int ox = dx + (box.rect.w - dw) / 2;
-                int oy = dy + (box.rect.h - dh) / 2;
-                // cover/contain 的图可能比盒子大；必须裁剪在 padding box 内，
-                // 否则大背景图会溢出到相邻内容上。
                 canvas->Clip(Rect{dx, dy, box.rect.w, box.rect.h});
-                canvas->DrawImage(img->bgra.data(), iw, ih, ox, oy, dw, dh);
+                if (tiled) {
+                    // 原生尺寸平铺，起点按 background-position 偏移
+                    int px = 0;
+                    int py = 0;
+                    if (box.style.has_background_position) {
+                        px = ResolveLength(box.style.background_position_x,
+                                           box.rect.w, 0);
+                        py = ResolveLength(box.style.background_position_y,
+                                           box.rect.h, 0);
+                        if (box.style.background_position_x.is_auto) {
+                            px = (box.rect.w - iw) / 2;
+                        }
+                        if (box.style.background_position_y.is_auto) {
+                            py = (box.rect.h - ih) / 2;
+                        }
+                    }
+                    int start_x = dx + ((px % iw) + iw) % iw - iw;
+                    int start_y = dy + ((py % ih) + ih) % ih - ih;
+                    int tiles = 0;
+                    for (int ty = start_y; ty < dy + box.rect.h && tiles < 4000;
+                         ty += ih) {
+                        if (rep == "repeat-x" && ty != start_y) break;
+                        for (int tx = start_x; tx < dx + box.rect.w;
+                             tx += iw) {
+                            canvas->DrawImage(img->bgra.data(), iw, ih, tx, ty,
+                                              iw, ih);
+                            if (++tiles >= 4000) break;
+                        }
+                        if (rep == "repeat-y") break;
+                    }
+                } else {
+                    if (box.style.background_size == "contain") {
+                        float s = std::min((float)dw / iw, (float)dh / ih);
+                        dw = (int)(iw * s);
+                        dh = (int)(ih * s);
+                    } else if (box.style.background_size != "stretch" &&
+                               box.style.background_size != "auto") {
+                        float s = std::max((float)dw / iw, (float)dh / ih);
+                        dw = (int)(iw * s);
+                        dh = (int)(ih * s);
+                    } else if (box.style.background_size == "auto") {
+                        // auto：原生尺寸（不再强行 cover），更贴近 CSS 语义
+                        dw = iw;
+                        dh = ih;
+                    }
+                    int ox = dx + (box.rect.w - dw) / 2;
+                    int oy = dy + (box.rect.h - dh) / 2;
+                    if (box.style.has_background_position) {
+                        int px = box.style.background_position_x.is_auto
+                                     ? (box.rect.w - dw) / 2
+                                     : ResolveLength(box.style.background_position_x,
+                                                     box.rect.w, 0);
+                        int py = box.style.background_position_y.is_auto
+                                     ? (box.rect.h - dh) / 2
+                                     : ResolveLength(box.style.background_position_y,
+                                                     box.rect.h, 0);
+                        ox = dx + px;
+                        oy = dy + py;
+                    }
+                    canvas->DrawImage(img->bgra.data(), iw, ih, ox, oy, dw, dh);
+                }
                 canvas->ResetClip();
             }
         }
@@ -2149,6 +2231,8 @@ void Page::ParseHtml(const std::string& html, const std::string& url) {
     data_.error.clear();
     data_.ready = true;
     root_ = ::zb::ParseHtml(html);
+    // CSS 变量表按页面重建：默认样式 + 页面样式依次收集，后定义覆盖先定义。
+    CssVarsReset();
     rules_ = DefaultRules();
     int index = (int)rules_.size();
     CollectStyleRules(root_.get(), rules_, &index);
@@ -2202,7 +2286,7 @@ void Page::AttachImages(
         Node* n = stack.back();
         stack.pop_back();
         if (n->type == NodeType::Element && n->tag == "img") {
-            std::string src = n->Attr("src");
+            std::string src = ImageSourceOf(n);
             if (!src.empty()) {
                 std::string absolute = ResolveUrl(base, src);
                 auto it = images.find(absolute);

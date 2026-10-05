@@ -168,7 +168,7 @@ build\zero-browser.exe --shot --url http://127.0.0.1:8765/position.html ^
 :: 依次投递真实点击（画面暂停 / 进度条跳转），再截第二张
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/video2.html ^
     --out build\a.bmp --out2 build\b.bmp ^
-    --click 512,362 --click 678,520 --wait 1200 --after 600
+    --click 512,330 --click 678,493 --wait 1200 --after 600
 
 :: 图片 / 背景图 / grid / 表单
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/images.html   --out build\img.bmp --wait 1500 --size 1100x1900
@@ -243,6 +243,11 @@ build\atomic_check.exe 2000
   的属性选择器只命中文本框（提交按钮保持自适应宽度）
 - Cookie：`--cookie-test` 输出 `echo_body=Cookie: auth=abc123; pref=dark`，`jar_size=2`
 - 网络：显式 `ZB_PROXY=http://127.0.0.1:7890` 可抓取 `http://example.com`
+- **与 Edge 对标**（同一本地页面、同一窗口宽度，用 `tools/compare_render.py` 比行/列内容带）：
+  第一条内容带位置**完全重合**（相对 y 22–40 vs Edge 22–40），后续每段高度差约 6px；
+  字号按像素修正前，每行要高出 10–12px（根因是 `font-size` 被当成 pt 折算，见踩坑第 23 条）
+- 本地页面回归（`--shot` 实测 content_height）：images 1861 / grid 467 / position 1200 /
+  forms 469 / flexblocks 233 / video2 864 / index 577
 
 > 如果 `https://` 抓取失败并报 `Win32 错误 12185`（`ERROR_WINHTTP_CANNOT_CONNECT`），
 > 通常是**当前环境的网络策略阻断了 TLS/CONNECT**，不是浏览器代码问题；
@@ -266,12 +271,21 @@ build\atomic_check.exe 2000
 - 结构伪类：`:first-child` `:last-child` `:only-child` `:nth-child(an+b|odd|even)`
   `:nth-last-child` `:first-of-type` `:last-of-type` `:nth-of-type` `:root` `:empty`
 - 状态伪类（`:hover` `:focus` `:active` …）判为不匹配，避免规则永久生效
+- **CSS 变量**：`--x: v` 定义与 `var(--x[, fallback])` 替换（含嵌套），现代站点靠它定义颜色/间距
+- **`@media` / `@supports` 嵌套块**按桌面宽度分支解析（不再把整张样式表解析乱）
+- 颜色：`#rgb` / `#rrggbb` / `#rgba` / `#rrggbbaa`、`rgb()` / `rgba()`、`hsl()` / `hsla()`、
+  命名色；带透明度的值走 AlphaBlend 混合
+- `!important` 去标记处理；声明按括号/引号安全拆分（`url(data:…;base64,…)` 不再切坏）
 - 属性：`display`、`width`/`height`/`max-width`、`margin`/`padding`（简写与四边）、
-  `border`/`border-radius`、`background`/`background-image`/`background-size`、
-  `color`、`font-size`/`font-weight`/`font-style`、`text-align`、`line-height`、
-  `white-space`、`gap`、`flex-direction`/`justify-content`/`align-items`、
+  `border`/`border-radius`、`background`/`background-image`/`background-size`/
+  **`background-repeat`/`background-position`**、
+  `color`、`font-size`/`font-weight`（数值）/`font-style`/**`font-family`**/`font` 简写、
+  `text-align`、**`line-height`（含 `normal`＝按字体真实度量）**、`letter-spacing`、
+  `text-transform`、`white-space`、`gap`、`flex-direction`/`justify-content`/`align-items`、
   `grid-template-columns`/`grid-column`、`position`/`left`/`top`/`right`/`bottom`/`z-index`、
-  `box-sizing`、`overflow`
+  **`box-shadow`**、**`opacity`**、`box-sizing`、`overflow`
+- 长度单位：`px` / `%` / `em` / **`rem`** / **`vh`** / **`vw`** / `pt` / `cm` / `mm` / `in` / `ch`、
+  **`calc()`**（支持加减与数字乘除）；`max-content`/`fit-content` 等关键字按 auto 处理
 
 **布局**
 - 块级文档流、行内文本换行（含中文逐字断行与英文单词换行）
@@ -304,6 +318,9 @@ build\atomic_check.exe 2000
 - `width`/`height` 属性、CSS 宽高、保持宽高比、`width:100%`
 - 透明 PNG 半透明合成；破图按 `alt` 绘制占位框
 - `background-size: contain / cover / auto / stretch`，裁剪在盒内
+- **懒加载兜底**：`src` 为占位图时依次回退 `data-src` / `data-original` /
+  `data-lazy-src` / `srcset`（B 站等站点缩略图靠这个才出得来）
+- 缩小用 HALFTONE 平滑缩放（与 Chromium 的缩略图观感一致），放大用 COLORONCOLOR 保边缘
 
 **表单（仅渲染）**
 - `input`（`text`/`password`/`submit`/`button`/`reset`）、`button`、`select`、`textarea`
@@ -459,6 +476,16 @@ zero-browser/
     并把「吸附边界」拆成独立函数（`Utf8SnapToBoundary`），不要再借用 `Utf8PrevIndex` 去实现它；
     顺带还修掉了「字符被插到最后一个字符前面」的错位。回归手段：
     `--set-address "\empty" --focus-address --type "http://a.cn"` 必须输出 `hex=68 74 74 70 ...` 且不崩溃。
+23. **CSS 的 `font-size` 是像素，不是点。** `CreateFontW` 的高度参数是“字符高度（em）”，
+    早期写成 `-MulDiv(font_size, dpi, 72)`，在 96 DPI 下 16px 被放大成 21px 的 em，
+    于是**所有文字比 Chromium 大 30%**、行高整体偏大（对标 Edge 时表现为每行高 10–12px）。
+    正确写法是 `-MulDiv(font_size, dpi, 96)`，标准 DPI 下就是 `-font_size`。
+24. **受限环境里 `MFCreateTempFile` 会返回 `E_ACCESSDENIED`（0x80070005）。**
+    现象是网络视频播放失败、错误只有一句“无法创建媒体临时文件”——所以错误信息一定要带
+    `HRESULT`。修法是失败时自己用 `CreateFileW` 写缓存文件再 `MFCreateFile` 打开，
+    并在播放器 `Close()` 时删除（实测运行前后临时目录文件数都是 0）。
+    注意 MinGW 的 `mfplat` 导入库里**没有** `MFCreateMFByteStreamOnStream` 这个符号，
+    想用内存流方案会链接失败（`undefined reference to ...@8`）。
 
 ---
 

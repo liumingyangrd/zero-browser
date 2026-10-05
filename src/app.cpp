@@ -404,7 +404,35 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         size_t end = lower.find('>', img);
         if (end == std::string::npos) break;
         std::string tag = html.substr(img, end - img + 1);
-        std::string src = ExtractAttr(tag, "src");
+        // 与 dom.h 的 ImageSourceOf 保持一致：src 为空/占位时回退到懒加载属性，
+        // 否则 B 站这类站点的缩略图（真实地址在 data-src）会全部缺失。
+        std::string src;
+        static const char* kSrcAttrs[] = {
+            "src",           "data-src",       "data-original",
+            "data-lazy-src", "data-actualsrc", "data-original-src",
+            "data-echo"};
+        for (const char* a : kSrcAttrs) {
+            std::string v = Trim(ExtractAttr(tag, a));
+            if (v.empty()) continue;
+            std::string lv = ToLowerAscii(v);
+            if (lv.find("blank.gif") != std::string::npos ||
+                lv.find("placeholder") != std::string::npos ||
+                lv.find("r0lgodlhaqab") != std::string::npos) {
+                continue;
+            }
+            src = v;
+            break;
+        }
+        if (src.empty()) {
+            std::string ss = Trim(ExtractAttr(tag, "data-srcset"));
+            if (ss.empty()) ss = Trim(ExtractAttr(tag, "srcset"));
+            if (!ss.empty()) {
+                size_t comma = ss.find(',');
+                std::string first = Trim(ss.substr(0, comma));
+                size_t sp = first.find(' ');
+                src = sp == std::string::npos ? first : first.substr(0, sp);
+            }
+        }
         pos = end + 1;
         if (src.empty()) continue;
         std::string abs = ResolveUrl(base_url, src);

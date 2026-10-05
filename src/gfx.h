@@ -9,16 +9,27 @@ public:
     virtual ~Canvas() = default;
 
     // italic 参与字体选择：斜体与正体的字宽不同，忽略它会让排版与绘制不一致。
+    // family/weight 让 CSS 的 font-family / font-weight 真正生效（默认值保持旧行为）。
     virtual size_t MeasureText(const std::string& utf8, int font_size,
                                bool bold, int max_width = 0,
-                               bool italic = false) const = 0;
+                               bool italic = false,
+                               const std::string& family = std::string(),
+                               int weight = 0) const = 0;
     virtual void DrawText(const std::string& utf8, int x, int y,
                           int font_size, uint32_t rgb, bool bold,
-                          bool italic, bool underline) = 0;
-    // 文本行高（像素）。用于把文字在按钮/输入框里垂直居中。
+                          bool italic, bool underline,
+                          const std::string& family = std::string(),
+                          int weight = 0) = 0;
+    // 文本行高（像素）。用于把文字在按钮/输入框里垂直居中，
+    // 以及实现 line-height: normal（取字体真实度量，贴近 Chromium）。
     virtual int TextHeight(int font_size, bool bold = false,
-                           bool italic = false) const = 0;
+                           bool italic = false,
+                           const std::string& family = std::string(),
+                           int weight = 0) const = 0;
     virtual void FillRect(int x, int y, int w, int h, uint32_t rgb) = 0;
+    // 带透明度的填充：CSS 的 rgba()/hsla()/8 位 hex 都是半透明的。
+    virtual void FillRectAlpha(int x, int y, int w, int h, uint32_t rgb,
+                               uint8_t alpha) = 0;
     virtual void FillRoundRect(int x, int y, int w, int h, int radius,
                                uint32_t rgb) = 0;
     virtual void StrokeRect(int x, int y, int w, int h, uint32_t rgb) = 0;

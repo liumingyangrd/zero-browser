@@ -68,9 +68,9 @@ std::string WideToUtf8(const std::wstring& wide) {
 }
 
 size_t GdiCanvas::MeasureText(const std::string& utf8, int font_size,
-                              bool bold, int max_width,
-                              bool italic) const {
-    HFONT font = FontFor(font_size, bold, italic);
+                              bool bold, int max_width, bool italic,
+                              const std::string& family, int weight) const {
+    HFONT font = FontFor(font_size, bold, italic, family, weight);
     HFONT old = (HFONT)SelectObject(dc_, font);
     SIZE sz{};
     std::wstring wide = Utf8ToWide(utf8);
@@ -80,8 +80,9 @@ size_t GdiCanvas::MeasureText(const std::string& utf8, int font_size,
     return (size_t)sz.cx;
 }
 
-int GdiCanvas::TextHeight(int font_size, bool bold, bool italic) const {
-    HFONT font = FontFor(font_size, bold, italic);
+int GdiCanvas::TextHeight(int font_size, bool bold, bool italic,
+                          const std::string& family, int weight) const {
+    HFONT font = FontFor(font_size, bold, italic, family, weight);
     HFONT old = (HFONT)SelectObject(dc_, font);
     TEXTMETRICW tm{};
     GetTextMetricsW(dc_, &tm);
@@ -89,26 +90,66 @@ int GdiCanvas::TextHeight(int font_size, bool bold, bool italic) const {
     return (int)(tm.tmHeight + tm.tmExternalLeading);
 }
 
-HFONT GdiCanvas::FontFor(int font_size, bool bold, bool italic) const {
-    FontKey key{font_size, bold, italic};
+HFONT GdiCanvas::FontFor(int font_size, bool bold, bool italic,
+                         const std::string& family, int weight) const {
+    FontKey key{font_size, bold, italic, weight, family};
     auto it = fonts_.find(key);
     if (it != fonts_.end()) return it->second;
+    int w = weight > 0 ? weight : (bold ? FW_BOLD : FW_NORMAL);
+    std::wstring fam = family.empty() ? std::wstring(L"Segoe UI")
+                                      : Utf8ToWide(family);
+    // CSS 的 font-family 可能给出本机没有的字体（如 -apple-system、PingFang SC），
+    // 先探测是否存在，不存在就回退到 Segoe UI，避免 GDI 静默替换成难看的字形。
+    if (!fam.empty() && fam != L"Segoe UI") {
+        HDC screen = CreateCompatibleDC(nullptr);
+        LOGFONTW probe{};
+        probe.lfHeight = -12;
+        probe.lfCharSet = DEFAULT_CHARSET;
+        wcsncpy(probe.lfFaceName, fam.c_str(), 31);
+        HFONT test = CreateFontIndirectW(&probe);
+        wchar_t actual[64] = {};
+        if (test) {
+            HGDIOBJ old = SelectObject(screen, test);
+            GetTextFaceW(screen, 64, actual);
+            SelectObject(screen, old);
+            DeleteObject(test);
+        }
+        DeleteDC(screen);
+        std::wstring got = actual;
+        bool usable = !got.empty() &&
+                      _wcsicmp(got.c_str(), fam.c_str()) == 0;
+        if (!usable) {
+            // 通用族名交给 GDI 自己挑；未知字体名回退 Segoe UI
+            std::string lf = family;
+            for (char& c : lf) c = (char)std::tolower((unsigned char)c);
+            if (lf == "sans-serif" || lf == "system-ui" || lf == "serif" ||
+                lf == "monospace") {
+                fam = (lf == "monospace") ? L"Consolas" : L"Segoe UI";
+            } else {
+                fam = L"Segoe UI";
+            }
+        }
+    }
     HFONT font = CreateFontW(
-        -MulDiv(font_size, GetDeviceCaps(dc_, LOGPIXELSY), 72), 0, 0,
-        italic ? 10 : 0, bold ? FW_BOLD : FW_NORMAL, italic ? TRUE : FALSE,
-        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        // CSS 的 font-size 是**像素**，不是点。之前按 72 DPI 折算成 21px 的 em，
+        // 文字整体比 Chromium 大约 30%，行高也随之偏大。这里按 96 DPI 折算，
+        // 在标准 DPI 下就是 -font_size，字号与浏览器一致。
+        -MulDiv(font_size, GetDeviceCaps(dc_, LOGPIXELSY), 96), 0, 0,
+        italic ? 10 : 0, w, italic ? TRUE : FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, fam.c_str());
     fonts_[key] = font;
     return font;
 }
 
 void GdiCanvas::DrawText(const std::string& utf8, int x, int y,
                          int font_size, uint32_t rgb, bool bold,
-                         bool italic, bool underline) {
-    // 字体缓存必须把 italic 算进 key：斜体和正体是不同的字型，
+                         bool italic, bool underline, const std::string& family,
+                         int weight) {
+    // 字体缓存必须把 italic / family / weight 算进 key：斜体和正体是不同的字型，
     // 之前只用 (size, bold) 做 key，先画正体再画斜体会复用正体字体，
     // 结果 <i>/<em> 全部渲染成正体。
-    HFONT font = FontFor(font_size, bold, italic);
+    HFONT font = FontFor(font_size, bold, italic, family, weight);
     HFONT old = (HFONT)SelectObject(dc_, font);
     COLORREF old_color = SetTextColor(dc_, RGB((rgb >> 16) & 255,
                                                (rgb >> 8) & 255,
@@ -137,6 +178,51 @@ void GdiCanvas::FillRect(int x, int y, int w, int h, uint32_t rgb) {
                                      rgb & 255));
     ::FillRect(dc_, &rc, br);
     DeleteObject(br);
+}
+
+void GdiCanvas::FillRectAlpha(int x, int y, int w, int h, uint32_t rgb,
+                              uint8_t alpha) {
+    if (w <= 0 || h <= 0) return;
+    if (alpha >= 255) {
+        FillRect(x, y, w, h, rgb);
+        return;
+    }
+    if (alpha == 0) return;
+    // 用 1x1 的 32 位 DIB 做源，AlphaBlend 拉伸成目标矩形。
+    // AC_SRC_ALPHA + 预乘：这里直接把颜色按 alpha 预乘。
+    HDC mem = CreateCompatibleDC(dc_);
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = 1;
+    info.bmiHeader.biHeight = -1;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(mem, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!bmp || !bits) {
+        if (bmp) DeleteObject(bmp);
+        DeleteDC(mem);
+        FillRect(x, y, w, h, rgb);
+        return;
+    }
+    uint8_t* p = (uint8_t*)bits;
+    uint8_t r = (uint8_t)((rgb >> 16) & 255);
+    uint8_t g = (uint8_t)((rgb >> 8) & 255);
+    uint8_t b = (uint8_t)(rgb & 255);
+    p[0] = (uint8_t)(b * alpha / 255);
+    p[1] = (uint8_t)(g * alpha / 255);
+    p[2] = (uint8_t)(r * alpha / 255);
+    p[3] = alpha;
+    HGDIOBJ old = SelectObject(mem, bmp);
+    BLENDFUNCTION bf{};
+    bf.BlendOp = AC_SRC_OVER;
+    bf.SourceConstantAlpha = 255;
+    bf.AlphaFormat = AC_SRC_ALPHA;
+    AlphaBlend(dc_, x, y, w, h, mem, 0, 0, 1, 1, bf);
+    SelectObject(mem, old);
+    DeleteObject(bmp);
+    DeleteDC(mem);
 }
 
 void GdiCanvas::FillRoundRect(int x, int y, int w, int h, int radius,
@@ -245,7 +331,14 @@ void GdiCanvas::DrawImage(const uint8_t* bgra, int src_w, int src_h, int dst_x,
     }
     std::memcpy(bits, bgra, (size_t)src_w * src_h * 4);
     HGDIOBJ old = SelectObject(mem, bmp);
-    SetStretchBltMode(dc_, COLORONCOLOR);
+    // 缩小用 HALFTONE（Chromium 的缩略图是平滑的，COLORONCOLOR 会有明显锯齿）；
+    // 放大用 COLORONCOLOR 保持边缘清晰。HALFTONE 需要设置刷子原点，否则会有偏移。
+    if (dst_w < src_w || dst_h < src_h) {
+        SetStretchBltMode(dc_, HALFTONE);
+        SetBrushOrgEx(dc_, dst_x, dst_y, nullptr);
+    } else {
+        SetStretchBltMode(dc_, COLORONCOLOR);
+    }
     BLENDFUNCTION bf{};
     bf.BlendOp = AC_SRC_OVER;
     bf.BlendFlags = 0;

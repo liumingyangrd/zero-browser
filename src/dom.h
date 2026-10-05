@@ -85,4 +85,38 @@ inline std::string NodeText(const Node* node) {
     return out;
 }
 
+// 取 <img> 的实际图片来源。
+// 真实站点（B 站等）普遍用懒加载：src 先放 1x1 占位图，真实地址放在
+// data-src / data-original / data-lazy-src / srcset 里，由 JS 在进入视口后换过去。
+// 没有 JS 时若不兜底，整站缩略图全是空白——这是与 Chromium 最明显的观感差距之一。
+inline std::string ImageSourceOf(const Node* node) {
+    if (!node) return "";
+    static const char* kAttrs[] = {"src",       "data-src",      "data-original",
+                                   "data-lazy-src", "data-actualsrc",
+                                   "data-original-src", "data-echo"};
+    for (const char* a : kAttrs) {
+        std::string v = Trim(node->Attr(a));
+        if (v.empty()) continue;
+        std::string lv = Lower(v);
+        // 跳过占位图：blank.gif / 1x1 透明 gif 的 base64
+        if (lv.find("blank.gif") != std::string::npos ||
+            lv.find("placeholder") != std::string::npos ||
+            lv.find("r0lgodlhaqab") != std::string::npos) {
+            continue;
+        }
+        return v;
+    }
+    std::string srcset = Trim(node->Attr("data-srcset"));
+    if (srcset.empty()) srcset = Trim(node->Attr("srcset"));
+    if (!srcset.empty()) {
+        auto parts = SplitStr(srcset, ',');
+        if (!parts.empty()) {
+            std::string first = Trim(parts[0]);
+            size_t sp = first.find(' ');
+            return sp == std::string::npos ? first : first.substr(0, sp);
+        }
+    }
+    return "";
+}
+
 }  // namespace zb

@@ -22,14 +22,22 @@ public:
     void Init(int width, int height);
     size_t MeasureText(const std::string& utf8, int font_size,
                        bool bold, int max_width = 0,
-                       bool italic = false) const override;
+                       bool italic = false,
+                       const std::string& family = std::string(),
+                       int weight = 0) const override;
     int TextHeight(int font_size, bool bold = false,
-                   bool italic = false) const override;
+                   bool italic = false,
+                   const std::string& family = std::string(),
+                   int weight = 0) const override;
     void DrawText(const std::string& utf8, int x, int y,
                   int font_size, uint32_t rgb, bool bold,
-                  bool italic, bool underline) override;
+                  bool italic, bool underline,
+                  const std::string& family = std::string(),
+                  int weight = 0) override;
 
     void FillRect(int x, int y, int w, int h, uint32_t rgb);
+    void FillRectAlpha(int x, int y, int w, int h, uint32_t rgb,
+                       uint8_t alpha) override;
     void FillRoundRect(int x, int y, int w, int h, int radius, uint32_t rgb);
     void StrokeRect(int x, int y, int w, int h, uint32_t rgb);
     void StrokeLine(int x1, int y1, int x2, int y2, uint32_t rgb, int width = 1);
@@ -50,13 +58,19 @@ private:
         int size = 0;
         bool bold = false;
         bool italic = false;
+        int weight = 0;
+        std::string family;
         bool operator<(const FontKey& o) const {
             if (size != o.size) return size < o.size;
             if (bold != o.bold) return bold < o.bold;
-            return italic < o.italic;
+            if (italic != o.italic) return italic < o.italic;
+            if (weight != o.weight) return weight < o.weight;
+            return family < o.family;
         }
     };
-    HFONT FontFor(int font_size, bool bold, bool italic) const;
+    HFONT FontFor(int font_size, bool bold, bool italic,
+                  const std::string& family = std::string(),
+                  int weight = 0) const;
 
     mutable std::map<FontKey, HFONT> fonts_;
     HDC dc_ = nullptr;

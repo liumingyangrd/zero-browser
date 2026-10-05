@@ -1,5 +1,9 @@
 # Zero Browser
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
+![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
+
 **一个从零自研渲染内核的 Windows 浏览器（C++17 + Win32，无 Chromium）。**
 
 不依赖 Chromium / Blink / Gecko / WebView / iframe，也没有嵌入 Electron / CEF 等任何现成浏览器组件。
@@ -314,6 +318,7 @@ WinHTTP 传输 ──> html.cpp 解析 ──> DOM 树
 
 ```
 zero-browser/
+  LICENSE                  MIT 许可证
   build.bat                构建脚本
   src/
     main.cpp               入口；--shot / --net-test / --cookie-test 诊断
@@ -406,7 +411,8 @@ zero-browser/
 
 ---
 
-## 说明
+## 许可证
+
+本项目采用 **MIT** 许可证，详见 [LICENSE](LICENSE)。
 
 - 项目处于早期阶段，目标是尽量对齐真实浏览器的排版行为，欢迎通过 issue 反馈渲染差异
-- 仓库暂未附带开源许可证文件；如需使用请先与作者确认

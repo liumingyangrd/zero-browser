@@ -29,17 +29,17 @@ const char* kHomeHtml = R"HTML(<!DOCTYPE html>
   .foot { padding:16px 32px; border-top:1px solid #1e293b; color:#64748b; font-size:12px; }
 </style></head>
 <body>
-  <div class="top"><div class="brand">ZERO Browser</div><div class="tag">自建渲染内核 · 演示首页</div></div>
+  <div class="top"><div class="brand">ZERO Browser</div><div class="tag">Custom rendering engine · demo home page</div></div>
   <div class="hero">
-    <h1>一个不用 Chromium 的浏览器</h1>
-    <div class="sub">HTML 解析、CSS 解析、盒模型布局、绘制全部由本项目自己实现，不依赖任何现成浏览器内核。系统只负责传输、解码与出像素。这是当前网页引擎的渲染结果。</div>
+    <h1>A browser that does not use Chromium</h1>
+    <div class="sub">HTML parsing, CSS parsing, box model layout and painting are all implemented by this project itself, without relying on any existing browser engine. The system only handles transport, decoding and pixel output. This is the rendering result of the current web page engine.</div>
   </div>
   <div class="cards">
-    <div class="card"><h3>解析器</h3><p>自带 HTML 词法/语法解析与实体解码，生成 DOM 树。</p><p><a href="about:parser">查看解析器详情</a></p></div>
-    <div class="card"><h3>CSS 引擎</h3><p>选择器（类/ID/后代/属性/结构伪类）、盒模型、flex 与 grid 布局、position 定位与 z-index。</p><p><a href="about:css">查看 CSS 能力</a></p></div>
-    <div class="card"><h3>媒体与绘制</h3><p>图片/背景图经 WIC 解码、视频帧经 Media Foundation 解码，缩放、裁剪、合成与滚动全部自研。</p></div>
+    <div class="card"><h3>Parser</h3><p>Built-in HTML tokenizer/parser and entity decoding, producing a DOM tree.</p><p><a href="about:parser">View parser details</a></p></div>
+    <div class="card"><h3>CSS engine</h3><p>Selectors (class/ID/descendant/attribute/structural pseudo-classes), box model, flex and grid layout, position and z-index.</p><p><a href="about:css">View CSS capabilities</a></p></div>
+    <div class="card"><h3>Media and painting</h3><p>Images/background images are decoded through WIC and video frames through Media Foundation; scaling, clipping, compositing and scrolling are all built in-house.</p></div>
   </div>
-  <div class="foot">Zero Browser 0.1.1 · 自研渲染内核 · 页面由 zero-browser 渲染</div>
+  <div class="foot">Zero Browser 0.1.1 · custom rendering engine · page rendered by zero-browser</div>
 </body></html>
 )HTML";
 
@@ -56,12 +56,12 @@ const char* kParserHtml = R"HTML(<!DOCTYPE html>
   .note { background:#dbeafe; border:1px solid #93c5fd; border-radius:8px; padding:12px 16px; margin-top:20px; }
 </style></head>
 <body>
-  <div class="bar"><b>&lt;html&gt; 解析器</b> &nbsp; 由本项目实现的 HTML 语法分析</div>
+  <div class="bar"><b>&lt;html&gt; parser</b> &nbsp; HTML syntax analysis implemented by this project</div>
   <div class="body">
-    <h1>HTML 解析管线</h1>
-    <p>源代码被逐字符扫描：标签开始/结束、属性、注释、DOCTYPE、字符实体都会处理，输出一棵 DOM 树。</p>
+    <h1>HTML parsing pipeline</h1>
+    <p>The source is scanned character by character: tag start/end, attributes, comments, DOCTYPE and character entities are all handled, producing a DOM tree.</p>
     <pre>source --[ tokenizer ]--&gt; tokens --[ tree builder ]--&gt; DOM</pre>
-    <div class="note">本页由 Zero Browser 的解析器生成并排版。</div>
+    <div class="note">This page is generated and laid out by the Zero Browser parser.</div>
   </div>
 </body></html>
 )HTML";
@@ -82,14 +82,14 @@ const char* kCssHtml = R"HTML(<!DOCTYPE html>
   pre { background:#0f172a; color:#fbbf24; padding:14px; border-radius:8px; font-size:13px; }
 </style></head>
 <body>
-  <div class="bar"><b>CSS 引擎</b> &nbsp; 由本项目实现的选择器与盒模型</div>
+  <div class="bar"><b>CSS engine</b> &nbsp; selectors and box model implemented by this project</div>
   <div class="body">
-    <h1>CSS 排版</h1>
-    <p>样式表被解析为规则，选择器（标签、类、ID、后代）匹配元素，属性应用进盒模型。</p>
+    <h1>CSS layout</h1>
+    <p>Style sheets are parsed into rules, selectors (tag, class, ID, descendant) match elements, and properties are applied to the box model.</p>
     <div class="row">
-      <div class="box b1">盒模型 + flex 布局</div>
+      <div class="box b1">Box model + flex layout</div>
       <div class="box b2">border-radius</div>
-      <div class="box b3">文本排版</div>
+      <div class="box b3">Text layout</div>
     </div>
     <pre>.card { background:#2563eb; border-radius:8px; padding:12px; }</pre>
   </div>
@@ -109,16 +109,16 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
   td:first-child { width:180px; }
 </style></head>
 <body>
-  <div class="bar"><b>about:system</b> &nbsp; 自研内核信息</div>
+  <div class="bar"><b>about:system</b> &nbsp; custom engine information</div>
   <div class="body">
-    <h1>Zero Browser 系统信息</h1>
+    <h1>Zero Browser system information</h1>
     <table>
-      <tr><td>HTML 解析器</td><td>内置（tokenizer + tree builder）</td></tr>
-      <tr><td>CSS 引擎</td><td>内置（selector + box model）</td></tr>
-      <tr><td>布局引擎</td><td>内置（block / inline / flex / grid / position）</td></tr>
-      <tr><td>传输与解码</td><td>WinHTTP / Media Foundation / WIC / WASAPI（仅底层管道）</td></tr>
-      <tr><td>渲染</td><td>GDI 像素输出，无 WebView / Chromium</td></tr>
-      <tr><td>版本</td><td>0.1.1</td></tr>
+      <tr><td>HTML parser</td><td>Built-in (tokenizer + tree builder)</td></tr>
+      <tr><td>CSS engine</td><td>Built-in (selector + box model)</td></tr>
+      <tr><td>Layout engine</td><td>Built-in (block / inline / flex / grid / position)</td></tr>
+      <tr><td>Transport and decoding</td><td>WinHTTP / Media Foundation / WIC / WASAPI (low-level pipeline only)</td></tr>
+      <tr><td>Rendering</td><td>GDI pixel output, no WebView / Chromium</td></tr>
+      <tr><td>Version</td><td>0.1.1</td></tr>
     </table>
   </div>
 </body></html>
@@ -260,7 +260,7 @@ std::vector<SelectorPart> ParseSelectorChain(const std::string& raw) {
     return chain;
 }
 
-// 找到与 open 处的 '{' 匹配的 '}'，跳过字符串与注释里的花括号。
+// Find the '}' matching the '{' at open, skipping braces inside strings and comments.
 size_t FindMatchingBrace(const std::string& css, size_t open) {
     int depth = 0;
     char quote = 0;
@@ -281,9 +281,9 @@ size_t FindMatchingBrace(const std::string& css, size_t open) {
     return std::string::npos;
 }
 
-// 按分隔符拆分，但跳过 () [] 内部以及引号内部的分隔符。
-// 必须这样做：`background: url(data:image/png;base64,AAA)` 里的分号、
-// `content: ";"` 里的分号都不是声明分隔符，简单 SplitStr 会把声明切坏。
+// Split on a separator, but skip separators inside () [] and inside quotes.
+// This is required: the semicolons in `background: url(data:image/png;base64,AAA)`
+// and in `content: ";"` are not declaration separators; a naive SplitStr would cut declarations apart.
 std::vector<std::string> SplitTopLevel(const std::string& s, char sep) {
     std::vector<std::string> out;
     int depth = 0;
@@ -314,8 +314,8 @@ std::vector<std::string> SplitTopLevel(const std::string& s, char sep) {
     return out;
 }
 
-// 媒体查询是否适用于当前桌面视口。@media 块不再破坏整个样式表：
-// 没有宽度条件的（如 print、screen）一律采用；带宽度条件时按桌面宽度判断。
+// Whether a media query applies to the current desktop viewport. @media blocks no longer break the whole style sheet:
+// those without a width condition (e.g. print, screen) are always accepted; with a width condition, the desktop width decides.
 bool MediaQueryMatchesDesktop(const std::string& query) {
     const int kDesktopWidth = 1280;
     std::string q = Lower(query);
@@ -344,7 +344,7 @@ std::vector<CssRule> ParseCssText(const std::string& css_raw, int* index) {
     std::vector<CssRule> rules;
     std::string css = RemoveComments(css_raw);
     size_t pos = 0;
-    // 按逗号拆分选择器组，但跳过 :not(...) / [attr="a,b"] 内部的逗号。
+    // Split a selector group on commas, but skip commas inside :not(...) / [attr="a,b"].
     auto split_selectors = [](const std::string& s) {
         std::vector<std::string> out;
         for (const auto& piece : SplitTopLevel(s, ',')) {
@@ -361,7 +361,7 @@ std::vector<CssRule> ParseCssText(const std::string& css_raw, int* index) {
         std::string body = css.substr(open + 1, close - open - 1);
 
         if (!selector_text.empty() && selector_text[0] == '@') {
-            // @media / @supports 里是嵌套规则，递归解析；其余 at 规则跳过整个块。
+            // @media / @supports contain nested rules and are parsed recursively; other at-rules skip the whole block.
             std::string at = Lower(selector_text);
             bool nested = StartsWith(at, "@media") || StartsWith(at, "@supports") ||
                           StartsWith(at, "@layer");
@@ -387,8 +387,8 @@ std::vector<CssRule> ParseCssText(const std::string& css_raw, int* index) {
         for (const auto& decl : SplitTopLevel(body, ';')) {
             std::string d = Trim(decl);
             if (d.empty()) continue;
-            // 跳过自定义属性（var() 解析另行处理）以外的普通声明；
-            // 冒号要取第一个“不在括号内”的。
+            // Skip plain declarations other than custom properties (var() resolution is handled
+            // separately); the colon must be the first one "not inside parentheses".
             int depth = 0;
             char quote = 0;
             size_t colon = std::string::npos;
@@ -631,7 +631,7 @@ const Box* FindVideoBox(const Box* box, int x, int y, bool want_fixed,
                         bool in_fixed) {
     if (!box || box->hidden) return nullptr;
     bool cur_fixed = in_fixed || box->fixed;
-    // 普通搜索与 fixed 搜索分开：遇到另一类子树直接剪枝，避免坐标混用。
+    // Normal and fixed searches are kept separate: subtrees of the other kind are pruned outright, avoiding mixed coordinates.
     if (cur_fixed != want_fixed) return nullptr;
     if (box->node && box->node->tag == "video" && box->rect.contains(x, y)) {
         return box;
@@ -653,19 +653,19 @@ struct InlinePiece {
     bool link = false;
     std::string href;
     bool hard_break = false;
-    // 图片替换元素（<img>）。非空时按 image_w/image_h 参与行内布局。
+    // Image replaced element (<img>). When non-empty it participates in inline layout via image_w/image_h.
     std::shared_ptr<Image> image;
     int image_w = 0;
     int image_h = 0;
     std::string alt_text;
-    // 表单控件（input/button/select/textarea）。非空时按 widget_w/widget_h 排布。
+    // Form control (input/button/select/textarea). When non-empty it is laid out via widget_w/widget_h.
     std::string widget;
     int widget_w = 0;
     int widget_h = 0;
     std::string widget_value;
 };
 
-// 构造行内片段。字段较多，用具名构造避免聚合初始化漏字段告警。
+// Build an inline piece. There are many fields, so use named construction to avoid the missing-field warning from aggregate initialization.
 InlinePiece MakePiece(std::string text, const Style& style, bool link,
                       const std::string& href, bool hard_break = false) {
     InlinePiece p;
@@ -720,8 +720,8 @@ void TokenizeText(const std::string& text, const Style& style, bool link,
             bool has_word = !word.empty();
             flush_word();
             pending_space = false;
-            // 纯空白文本节点不应产生空行：HTML 中块级元素之间的换行/缩进
-            // 在 CSS 空白折叠后不占任何高度。只有实际内容后的换行才断行。
+            // A whitespace-only text node must not produce a blank line: in HTML, newlines/indentation
+            // between block elements take no height after CSS white-space collapsing; only a newline after real content breaks the line.
             if (has_word) out.push_back(MakePiece("", style, link, href, true));
             i++;
             continue;
@@ -789,7 +789,7 @@ void CollectInline(const Node* node, Style parent,
         } else if (!node->Attr("height").empty()) {
             h = (int)std::atof(node->Attr("height").c_str());
         }
-        // 只指定一边时按图片内在长宽比补另一边；都没有时用内在尺寸。
+        // When only one side is specified, the other is derived from the image's intrinsic aspect ratio; when neither is, the intrinsic size is used.
         if (iw > 0 && ih > 0) {
             if (w > 0 && h <= 0) h = (int)(w * (double)ih / iw);
             else if (h > 0 && w <= 0) w = (int)(h * (double)iw / ih);
@@ -834,7 +834,7 @@ void CollectInline(const Node* node, Style parent,
                 if (type == "submit" || type == "button" || type == "reset") {
                     p.widget = "button";
                     v = node->Attr("value");
-                    if (v.empty()) v = type == "submit" ? "提交" : type;
+                    if (v.empty()) v = type == "submit" ? "Submit" : type;
                 } else {
                     v = node->Attr("value");
                     if (v.empty()) v = node->Attr("placeholder");
@@ -889,7 +889,7 @@ struct PlacedRun {
 };
 
 int LineHeightOf(const Style& s, Canvas* canvas = nullptr) {
-    // line-height 未显式指定时按字体真实度量取（等价 CSS 的 normal，贴近 Chromium）。
+    // When line-height is not set explicitly, use the font's real metrics (equivalent to CSS normal, close to Chromium).
     if (s.line_height > 0.f) {
         return std::max(2, (int)std::round(s.font_size * s.line_height));
     }
@@ -901,9 +901,9 @@ int LineHeightOf(const Style& s, Canvas* canvas = nullptr) {
     return std::max(2, (int)std::round(s.font_size * 1.32f));
 }
 
-// 把行内 pieces 排成若干行并追加到 box.runs。
-// start_y >= 0 时从该 y 开始（块流交错布局用匿名块盒），否则从 box.content.y 开始。
-// 返回本次行内内容占用的高度。
+// Lay inline pieces out into several lines and append them to box.runs.
+// With start_y >= 0, start at that y (anonymous block boxes in interleaved block flow), otherwise start at box.content.y.
+// Returns the height occupied by this inline content.
 int LayoutInlineInto(Box& box, const std::vector<InlinePiece>& pieces,
                      Canvas* canvas, int start_y = -1) {
     if (pieces.empty()) return 0;
@@ -927,7 +927,7 @@ int LayoutInlineInto(Box& box, const std::vector<InlinePiece>& pieces,
             p.run.rect.x = box.content.x + shift + p.rel_x;
             if (p.run.image || p.run.image_missing ||
                 !p.run.widget.empty()) {
-                // 替换元素底边对齐文本基线（浏览器默认 vertical-align:baseline）。
+                // A replaced element's bottom edge aligns with the text baseline (browser default vertical-align:baseline).
                 p.run.rect.y = baseline - p.run.rect.h;
             } else {
                 p.run.rect.y = y;
@@ -993,13 +993,13 @@ int LayoutInlineInto(Box& box, const std::vector<InlinePiece>& pieces,
         if (piece.text.empty()) continue;
         bool all_space = piece.text.find_first_not_of(" \t\r\n") ==
                          std::string::npos;
-        // 行首的纯空白不占位，避免图片/文本行尾的换行缩进产生幽灵空行。
+        // Leading whitespace on a line takes no space, avoiding phantom blank lines from newline indentation after images/text.
         if (all_space && line.empty()) continue;
         int w = (int)canvas->MeasureText(piece.text, piece.style.font_size,
                                          piece.style.bold);
         if (w <= 0) continue;
-        // 行尾放不下的空格直接丢弃（浏览器折叠行尾空白），
-        // 否则它会另起一行并继承上一个替换元素的行高，凭空撑高容器。
+        // A space that does not fit at the line end is dropped (browsers collapse trailing whitespace);
+        // otherwise it would start a new line and inherit the previous replaced element's line height, inflating the container.
         if (all_space && x + w > right) continue;
         if (x + w > right && !line.empty()) {
             flush_line();
@@ -1091,8 +1091,8 @@ void LayoutBox(Box& box, Canvas* canvas);
 std::string ListMarkerFor(const Node* li);
 bool IsWhitespaceOnly(const std::string& s);
 
-// 定位单个块级子盒：宽度、margin、auto 居中、递归布局，并推进流位置 y。
-// absolute/fixed 不占流：仍布局内部内容，但不推进 y、不影响父容器高度。
+// Place a single block-level child box: width, margin, auto centering, recursive layout, and advance the flow position y.
+// absolute/fixed do not take flow space: their contents are still laid out, but y is not advanced and the parent height is unaffected.
 void PlaceBlockChild(Box& box, Box& child, int& y, int& bottom, Canvas* canvas) {
     bool out_of_flow = child.style.position == "absolute" ||
                        child.style.position == "fixed";
@@ -1158,9 +1158,9 @@ void PlaceBlockChild(Box& box, Box& child, int& y, int& bottom, Canvas* canvas) 
     bottom = std::max(bottom, y - box.content.y);
 }
 
-// 块容器的主布局：严格按文档顺序交错排布行内内容与块级子盒。
-// 连续的行内内容构成一个“匿名块盒”（浏览器行为），否则 label/input 这种
-// 交替结构会被拆成“所有行内内容 + 所有块”两段，表单控件全跑到容器顶部。
+// Main layout of a block container: inline content and block-level child boxes are interleaved strictly in document order.
+// Consecutive inline content forms an "anonymous block box" (browser behavior); otherwise an alternating
+// structure like label/input would be split into "all inline content + all blocks", sending every form control to the container top.
 void LayoutBlockFlow(Box& box, Canvas* canvas) {
     std::map<Node*, Box*> by_node;
     for (auto& c : box.children) {
@@ -1200,10 +1200,10 @@ void LayoutBlockFlow(Box& box, Canvas* canvas) {
             const Node* c = kids[i].get();
             if (c->type == NodeType::Text) {
                 if (IsWhitespaceOnly(c->text)) {
-                    // 块级边界处的换行/缩进要折叠掉；但行内元素之间的空白
-                    // 必须保留成一个空格（<a>登录</a> <a>注册</a>）。
-                    // 末尾空白一律丢弃——否则宽图片后面的缩进会变成“第二行”，
-                    // 并继承图片行高，把容器撑成两倍高。
+                    // Newlines/indentation at block boundaries are collapsed; but whitespace between inline
+                    // elements must be kept as a single space (<a>Log in</a> <a>Sign up</a>).
+                    // Trailing whitespace is always discarded -- otherwise indentation after a wide image would
+                    // become a "second line" and inherit the image's line height, doubling the container height.
                     bool has_next = false;
                     bool next_inline = false;
                     for (size_t j = i + 1; j < kids.size(); ++j) {
@@ -1230,14 +1230,14 @@ void LayoutBlockFlow(Box& box, Canvas* canvas) {
             if (!is_inline_display(cs.display)) {
                 auto it = by_node.find(const_cast<Node*>(c));
                 if (it != by_node.end()) {
-                    // 绝对/固定定位的盒子不打断行内流（它脱离文档流）。
+                    // An absolutely/fixed positioned box does not interrupt the inline flow (it is out of flow).
                     if (cs.position != "absolute" && cs.position != "fixed") {
                         flush();
                     }
                     PlaceBlockChild(box, *it->second, y, bottom, canvas);
                     continue;
                 }
-                // 没有对应盒子：退化为行内内容，避免整块丢失。
+                // No matching box: fall back to inline content so the whole block is not lost.
             }
             CollectInline(c, box.style, rules, box.content.w, false, "", buf);
         }
@@ -1370,8 +1370,8 @@ void LayoutFlexRow(Box& box, Canvas* canvas) {
     }
 }
 
-// 把 "120px 1fr repeat(2, 1fr)" 拆成若干 track 字符串。
-// 空格和顶层逗号都是分隔符；括号内的逗号要保留。
+// Split "120px 1fr repeat(2, 1fr)" into individual track strings.
+// Spaces and top-level commas are separators; commas inside parentheses are kept.
 std::vector<std::string> SplitGridTracks(const std::string& value) {
     std::vector<std::string> out;
     if (value.empty()) return out;
@@ -1441,7 +1441,7 @@ bool ParseGridTrack(const std::string& raw, GridTrack& t) {
     return true;
 }
 
-// minmax(A, B)：取 A；repeat(N, X)：复制 N 份。够覆盖常见 grid。
+// minmax(A, B): take A; repeat(N, X): copy N times. Enough to cover common grid usage.
 std::vector<std::string> ExpandGridTracks(const std::string& value) {
     std::vector<std::string> raw = SplitGridTracks(value);
     std::vector<std::string> out;
@@ -1472,13 +1472,13 @@ std::vector<std::string> ExpandGridTracks(const std::string& value) {
 }
 
 int ParseGridSpan(const Style& s, int fallback) {
-    // 支持 grid-column: span N / 1 / 1 / 3 / 1 / span 2。
+    // Supports grid-column: span N / 1 / 1 / 3 / 1 / span 2.
     const std::string& v = s.grid_column;
     if (v.empty()) return fallback;
     if (StartsWith(v, "span ")) {
         return std::max(1, std::atoi(v.c_str() + 5));
     }
-    // "1 / 3" 形式：只认跨度。
+    // "1 / 3" form: only the span is recognized.
     if (v.find('/') != std::string::npos) {
         auto parts = SplitStr(v, '/');
         if (parts.size() == 2) {
@@ -1497,7 +1497,7 @@ void LayoutGrid(Box& box, Canvas* canvas) {
     int cols = (int)tracks.size();
     if (cols <= 0) cols = 1;
 
-    // 先解析每列的基准宽度，再按 fr/剩余空间分摊。
+    // First parse each column's base width, then distribute fr units over the remaining space.
     int gap = box.style.gap;
     int avail = std::max(0, box.content.w - gap * (cols - 1));
     std::vector<GridTrack> gt(cols);
@@ -1529,7 +1529,7 @@ void LayoutGrid(Box& box, Canvas* canvas) {
         if (gt[i].is_auto) widths[i] = remain / std::max(1, cols);
     }
 
-    // auto-flow row：逐行放置，支持跨列。
+    // auto-flow row: place row by row, supporting column spans.
     std::vector<int> row_height(cols, 0);
     int col = 0;
     int y = box.content.y;
@@ -1540,7 +1540,7 @@ void LayoutGrid(Box& box, Canvas* canvas) {
         int span = ParseGridSpan(child->style, 1);
         span = std::max(1, std::min(span, cols));
         if (col + span > cols) {
-            // 放不下则换行；把上一行最高高度累加进 y。
+            // If it does not fit, wrap; add the previous row's tallest height to y.
             int row_h = 0;
             for (int j = 0; j < cols; ++j) row_h = std::max(row_h, row_height[j]);
             y += row_h + gap;
@@ -1556,7 +1556,7 @@ void LayoutGrid(Box& box, Canvas* canvas) {
                                track_w);
         w = ClampMaxWidth(child->style, w, box.content.w);
         int border = BorderSize(child->style);
-        // 实际 x = 前面所有列宽 + gap
+        // Actual x = widths of all preceding columns + gap
         int x = box.content.x;
         for (int k = 0; k < col; ++k) x += widths[k] + gap;
         child->rect.x = x;
@@ -1583,7 +1583,7 @@ void LayoutGrid(Box& box, Canvas* canvas) {
         grid_bottom = std::max(grid_bottom, y + child->rect.h);
         col += span;
         if (col >= cols) {
-            // 本行放满：结算行高，下一行从新行开始。
+            // The row is full: settle the row height and start the next row.
             int row_h = 0;
             for (int j = 0; j < cols; ++j) row_h = std::max(row_h, row_height[j]);
             y += row_h + gap;
@@ -1614,9 +1614,9 @@ bool IsWhitespaceOnly(const std::string& s) {
     return true;
 }
 
-// 平移一个盒子的全部后代（子盒 + 行内 runs）。
-// 定位阶段改变盒子的 content 原点后，盒内已经排好的文字/图片必须一起搬家，
-// 否则 fixed/absolute 盒的文字会留在原来的流位置（悬浮块看起来是空的）。
+// Translate all descendants of a box (child boxes + inline runs).
+// After the positioning stage changes a box's content origin, text/images already laid out inside it must move along,
+// otherwise text of a fixed/absolute box would stay at the old flow position (making the floating block look empty).
 void ShiftBoxSubtree(Box& box, int dx, int dy) {
     if (dx == 0 && dy == 0) return;
     for (auto& r : box.runs) {
@@ -1632,10 +1632,10 @@ void ShiftBoxSubtree(Box& box, int dx, int dy) {
     }
 }
 
-// 把定位偏移应用到盒子树。relative 在流内位置基础上偏移；
-// absolute 以父盒 content box 为基准，fixed 以视口为基准。
+// Apply positioning offsets to the box tree. relative offsets from the in-flow position;
+// absolute is relative to the parent box's content box, fixed is relative to the viewport.
 void ApplyPositioning(Box& box, const Rect& viewport) {
-    // 先处理子节点，父节点偏移会统一作用于已经定位好的子节点坐标。
+    // Process children first; the parent's offset is then applied uniformly to already-positioned child coordinates.
     for (auto& c : box.children) {
         if (c->hidden) continue;
         const Style& s = c->style;
@@ -1651,8 +1651,8 @@ void ApplyPositioning(Box& box, const Rect& viewport) {
             c->content.y += oy;
             ShiftBoxSubtree(*c, ox, oy);
         } else if (s.position == "absolute") {
-            // 找最近的 positioned 祖先：由调用链保证传入的是该祖先的 content box。
-            // 这里直接基于父盒的 content box 处理最简单且覆盖绝大多数场景。
+            // Find the nearest positioned ancestor: the call chain guarantees that the content box of that ancestor is passed in.
+            // Handling it directly from the parent box's content box is simplest and covers the vast majority of cases.
             Rect cb = {box.content.x, box.content.y, box.content.w,
                        box.content.h};
             int w = c->rect.w;
@@ -1687,8 +1687,8 @@ void ApplyPositioning(Box& box, const Rect& viewport) {
             if (!s.width.is_auto) w = box.style.Resolve(s.width, viewport.w, w);
             if (!s.height.is_auto) h = box.style.Resolve(s.height, viewport.h, h);
             int x = c->rect.x, y = c->rect.y;
-            // fixed 以视口为基准；rect 保持“视口顶部为 0”的局部坐标，
-            // Paint/命中时不再减 scroll。
+            // fixed is relative to the viewport; rect keeps local coordinates with "viewport top = 0",
+            // so Paint/hit-testing no longer subtracts scroll.
             if (!s.left.is_auto) x = viewport.x + box.style.Resolve(s.left, viewport.w, 0);
             else if (!s.right.is_auto) x = viewport.x + viewport.w - w - box.style.Resolve(s.right, viewport.w, 0);
             if (!s.top.is_auto) y = viewport.y + box.style.Resolve(s.top, viewport.h, 0);
@@ -1710,7 +1710,7 @@ void ApplyPositioning(Box& box, const Rect& viewport) {
                                                    s.PaddingBottom());
             ShiftBoxSubtree(*c, c->content.x - old_cx, c->content.y - old_cy);
         }
-        // 递归时给 absolute 子节点传它的父 content box，给 fixed 传无效基准。
+        // When recursing, pass the parent content box to absolute children and an invalid reference for fixed.
         ApplyPositioning(*c, viewport);
     }
 }
@@ -1722,8 +1722,8 @@ void LayoutBox(Box& box, Canvas* canvas) {
         return;
     }
     if (box.style.display == "flex") {
-        // flex 容器里的文字/行内图片也是内容：先按行内布局排一列，
-        // 再排真正的块级 flex 子项。否则“图标+文字”行会直接空白。
+        // Text/inline images inside a flex container are content too: lay out an inline line first,
+        // then lay out the real block-level flex items. Otherwise an "icon + text" row comes out blank.
         std::vector<InlinePiece> pieces;
         if (box.node) {
             for (const auto& c : box.node->children) {
@@ -1766,8 +1766,8 @@ void LayoutBox(Box& box, Canvas* canvas) {
     }
 
     if (box.style.display == "grid") {
-        // grid 容器同样可能混有行内文字/图片；先按行内布局排一列，
-        // 再按 grid-template-columns 排真正的子项。
+        // A grid container may likewise mix in inline text/images; lay out an inline line first,
+        // then arrange the real items by grid-template-columns.
         std::vector<InlinePiece> pieces;
         if (box.node) {
             for (const auto& c : box.node->children) {
@@ -1805,7 +1805,7 @@ void LayoutBox(Box& box, Canvas* canvas) {
         return;
     }
 
-    // 块容器：行内内容与块级子盒按文档顺序交错排布（见 LayoutBlockFlow）。
+    // Block container: inline content and block-level child boxes are interleaved in document order (see LayoutBlockFlow).
     LayoutBlockFlow(box, canvas);
     if (!box.style.height.is_auto) {
         box.rect.h = ResolveLength(box.style.height, box.content.h);
@@ -1868,8 +1868,8 @@ void PaintVideoControls(Canvas* canvas, const Box& box, MediaPlayer* player,
     canvas->FillRect(mx, cy - 7, 3, 14, speaker);
 }
 
-// 暂停时在画面中央画一个播放标记，让“已暂停”一眼可辨。
-// 纯自研绘制：圆角方块 + 逐行描出的三角形，不依赖任何外部资源。
+// When paused, draw a play badge in the middle of the frame so "paused" is clear at a glance.
+// Purely hand-rolled drawing: a rounded square plus a triangle stroked line by line, with no external resources.
 void PaintPausedBadge(Canvas* canvas, const Box& box, int dx, int dy) {
     int size = 64;
     int bx = dx + (box.rect.w - size) / 2;
@@ -1956,14 +1956,14 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
               const std::string& base_url, bool fixed_ctx = false) {
     if (box.hidden || box.rect.w <= 0 || box.rect.h <= 0) return;
 
-    // 坐标系约定（渲染与命中测试必须严格互逆）：
-    //   屏幕坐标 = 视口原点 + 文档坐标 - 滚动量
-    //   文档坐标 = 屏幕坐标 - 视口原点 + 滚动量   （见 BrowserApp::OnLButtonDown）
-    // 之前这里写成 doc - viewport + scroll，既没有加视口原点、滚动方向也反了，
-    // 结果是页面顶部被裁掉、内容整体上移，且与命中测试相差 2*viewport.y，
-    // 导致视频控件条、进度条、链接都点不中。
+    // Coordinate system convention (rendering and hit-testing must be exact inverses):
+    //   screen coords = viewport origin + document coords - scroll amount
+    //   document coords = screen coords - viewport origin + scroll amount   (see BrowserApp::OnLButtonDown)
+    // This was previously written as doc - viewport + scroll, neither adding the viewport origin nor keeping
+    // the scroll direction, so the top of the page was clipped, content shifted up as a whole, and it differed
+    // from hit-testing by 2*viewport.y -- making the video control bar, progress bar and links unclickable.
     bool is_fixed = fixed_ctx || box.fixed;
-    // fixed 子树使用视口局部坐标，不参与文档滚动裁剪。
+    // The fixed subtree uses viewport-local coordinates and is not clipped by document scrolling.
     int view_top = is_fixed ? -2000000 : scroll_y;
     int view_bottom = is_fixed ? 2000000 : scroll_y + viewport.h;
     if (box.rect.y + box.rect.h < view_top || box.rect.y > view_bottom ||
@@ -1974,8 +1974,8 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
     int dx = viewport.x + box.rect.x;
     int dy = is_fixed ? viewport.y + box.rect.y
                       : viewport.y + box.rect.y - scroll_y;
-    // box-shadow：Chromium 是高斯模糊，GDI 没有模糊能力，
-    // 这里用若干层递减透明度的矩形叠出近似柔和的阴影。
+    // box-shadow: Chromium uses a Gaussian blur and GDI has no blur capability, so several
+    // rectangles of decreasing opacity are stacked here to approximate a soft shadow.
     if (box.style.has_shadow && box.rect.w > 0 && box.rect.h > 0) {
         Color sc = ColorFromCss(box.style.shadow_color);
         if (!sc.transparent) {
@@ -2005,9 +2005,9 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
             canvas->FillRect(dx, dy, box.rect.w, box.rect.h, bg.rgb());
         }
     }
-    // background-image：默认 cover（拉伸且保持比例、居中）。真实站点里
-    // “整块背景图”远多于平铺，cover 比默认 auto 平铺更有用；
-    // 显式写了 background-repeat 时按平铺处理。
+    // background-image: cover by default (stretched while preserving aspect ratio, centered). On real sites
+    // a "full-block background image" is far more common than tiling, so cover is more useful than the default
+    // auto tiling; when background-repeat is written explicitly, tiling is used.
     if (!box.style.background_image.empty()) {
         std::string abs = ResolveUrl(base_url, box.style.background_image);
         auto img_it = images.find(abs);
@@ -2025,7 +2025,7 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
             if (iw > 0 && ih > 0) {
                 canvas->Clip(Rect{dx, dy, box.rect.w, box.rect.h});
                 if (tiled) {
-                    // 原生尺寸平铺，起点按 background-position 偏移
+                    // Tile at natural size, with the start point offset by background-position
                     int px = 0;
                     int py = 0;
                     if (box.style.has_background_position) {
@@ -2065,7 +2065,7 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
                         dw = (int)(iw * s);
                         dh = (int)(ih * s);
                     } else if (box.style.background_size == "auto") {
-                        // auto：原生尺寸（不再强行 cover），更贴近 CSS 语义
+                        // auto: natural size (no forced cover), closer to CSS semantics
                         dw = iw;
                         dh = ih;
                     }
@@ -2114,8 +2114,8 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
             } else {
                 canvas->FillRect(dx, dy, box.rect.w, box.rect.h, 0x000000);
                 std::string message = player->Failed()
-                                          ? "视频无法播放: " + player->Error()
-                                          : "视频加载中...";
+                                          ? "Video cannot be played: " + player->Error()
+                                          : "Loading video...";
                 canvas->DrawText(message, dx + 8, dy + 8, 13,
                                  player->Failed() ? 0xf87171 : 0x94a3b8, false,
                                  false, false);
@@ -2126,7 +2126,7 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
             }
         } else {
             canvas->FillRect(dx, dy, box.rect.w, box.rect.h, 0x000000);
-            canvas->DrawText("无视频源", dx + 8, dy + 8, 13, 0x94a3b8, false,
+            canvas->DrawText("No video source", dx + 8, dy + 8, 13, 0x94a3b8, false,
                              false, false);
         }
     }
@@ -2153,7 +2153,7 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
         if (run.image_missing) {
             canvas->FillRect(dx, dy, run.rect.w, run.rect.h, 0xe2e8f0);
             canvas->StrokeRect(dx, dy, run.rect.w, run.rect.h, 0x94a3b8);
-            std::string alt = run.alt_text.empty() ? "图片加载失败" : run.alt_text;
+            std::string alt = run.alt_text.empty() ? "Image failed to load" : run.alt_text;
             int fs = std::max(10, std::min(13, run.rect.h / 4));
             int max_chars = std::max(1, run.rect.w / std::max(6, fs));
             if (alt.size() > (size_t)max_chars) {
@@ -2168,13 +2168,13 @@ void PaintBox(const Box& box, Canvas* canvas, const Rect& viewport,
         canvas->DrawText(run.text, dx, dy, run.font_size,
                          c.rgb(), run.bold, run.italic, run.underline);
     }
-        // 先画普通子节点，再画定位子节点：定位元素浮在普通内容之上。
+        // Paint normal children first, then positioned children: positioned elements float above normal content.
     for (const auto& c : box.children) {
         if (c->style.positioned || c->fixed) continue;
         PaintBox(*c, canvas, viewport, scroll_y, media, images, base_url,
                  is_fixed);
     }
-    // positioned/fixed 子节点按 z-index 稳定排序（同值保持 DOM 顺序）。
+    // positioned/fixed children are stably sorted by z-index (equal values keep DOM order).
     std::vector<const Box*> pos_children;
     for (const auto& c : box.children) {
         if (c->style.positioned || c->fixed) pos_children.push_back(c.get());
@@ -2205,7 +2205,7 @@ void CollectLinks(const Box& box, std::vector<LinkArea>& out,
 }  // namespace
 
 std::unique_ptr<Box> Layout::Build(Canvas* measurer) {
-    // vh / vw / calc() 折算需要知道视口尺寸，compute style 之前先写入。
+    // vh / vw / calc() resolution needs the viewport size, so set it before computing styles.
     CssViewportWidth() = viewport_w_;
     CssViewportHeight() = viewport_h_ > 0 ? viewport_h_ : 800;
     auto root = std::make_unique<Box>();
@@ -2231,7 +2231,7 @@ void Page::ParseHtml(const std::string& html, const std::string& url) {
     data_.error.clear();
     data_.ready = true;
     root_ = ::zb::ParseHtml(html);
-    // CSS 变量表按页面重建：默认样式 + 页面样式依次收集，后定义覆盖先定义。
+    // The CSS variable table is rebuilt per page: default styles + page styles are collected in order, later definitions overriding earlier ones.
     CssVarsReset();
     rules_ = DefaultRules();
     int index = (int)rules_.size();
@@ -2239,7 +2239,7 @@ void Page::ParseHtml(const std::string& html, const std::string& url) {
     data_.title = "";
     const Node* title = FindFirstElement(root_.get(), "title");
     if (title) data_.title = Trim(TextOf(title));
-    if (data_.title.empty()) data_.title = url.empty() ? "页面" : url;
+    if (data_.title.empty()) data_.title = url.empty() ? "Page" : url;
     BuildMediaPlayers();
 }
 
@@ -2331,7 +2331,7 @@ bool Page::UpdateMedia() {
 }
 
 bool Page::MediaClick(int x, int y, int fixed_x, int fixed_y) {
-    // 先找普通（滚动文档坐标）视频，再找 fixed（视口局部坐标）视频。
+    // Look for a normal (scrolled document coordinates) video first, then a fixed (viewport-local coordinates) one.
     const Box* box = FindVideoBox(root_box_.get(), x, y, false, false);
     int use_x = x, use_y = y;
     if (!box && fixed_x > -2147483647) {

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Grid 布局测试</title><style>
+<html><head><meta charset="utf-8"><title>Grid layout test</title><style>
 body { margin:0; background:#f8fafc; color:#0f172a; font-family:Segoe UI; font-size:14px; }
 h1 { font-size:20px; margin:16px 8px 8px 8px; }
 .grid3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; padding:8px; }
@@ -10,21 +10,21 @@ h1 { font-size:20px; margin:16px 8px 8px 8px; }
 .grid-auto { display:grid; grid-template-columns: auto auto; gap:8px; padding:8px; }
 .chip { border:1px solid #94a3b8; padding:6px 10px; background:#f1f5f9; }
 </style></head><body>
-<h1>CSS Grid 常用子集</h1>
+<h1>Common CSS Grid subset</h1>
 <div class="grid3">
-  <div class="card"><h3>卡 1</h3><p>repeat(3, 1fr) 三列等宽</p></div>
-  <div class="card"><h3>卡 2</h3><p>第二列</p></div>
-  <div class="card"><h3>卡 3</h3><p>第三列</p></div>
+  <div class="card"><h3>Card 1</h3><p>repeat(3, 1fr) three equal columns</p></div>
+  <div class="card"><h3>Card 2</h3><p>Second column</p></div>
+  <div class="card"><h3>Card 3</h3><p>Third column</p></div>
 </div>
 <div class="grid-mixed">
-  <div class="card"><h3>侧栏</h3><p>180px 固定列</p></div>
-  <div class="card wide"><h3>跨两列</h3><p>grid-column: span 2</p></div>
-  <div class="card"><h3>回行</h3><p>第二行第一列</p></div>
-  <div class="card"><h3>第二行第二列</h3><p>1fr</p></div>
-  <div class="card"><h3>第二行第三列</h3><p>1fr</p></div>
+  <div class="card"><h3>Sidebar</h3><p>180px fixed column</p></div>
+  <div class="card wide"><h3>Spans two columns</h3><p>grid-column: span 2</p></div>
+  <div class="card"><h3>Wraps to next row</h3><p>Second row, first column</p></div>
+  <div class="card"><h3>Second row, second column</h3><p>1fr</p></div>
+  <div class="card"><h3>Second row, third column</h3><p>1fr</p></div>
 </div>
 <div class="grid-auto">
-  <div class="chip">自动列</div>
-  <div class="chip">auto 列</div>
+  <div class="chip">automatic column</div>
+  <div class="chip">auto column</div>
 </div>
 </body></html>

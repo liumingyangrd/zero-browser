@@ -1,15 +1,17 @@
-"""统计截图里的非背景像素，用于自动化验证渲染结果 / 与 Edge 对比。
+"""Count non-background pixels in a screenshot, for automated verification of
+rendering results / comparison against a reference browser.
 
-用法:
-  python tools/pixelstat.py <图片> [x0 y0 x1 y1] [--bg RRGGBB]
+Usage:
+  python tools/pixelstat.py <image> [x0 y0 x1 y1] [--bg RRGGBB]
 
-输出: 尺寸、采样区非背景像素数与占比、非背景像素的包围盒、若干采样点的颜色。
+Output: size, non-background pixel count and ratio in the sampled region, the
+bounding box of the non-background pixels, and the colors of a few sample points.
 """
 import sys
 
 try:
     from PIL import Image
-except ImportError:  # Pillow 不可用时退化为纯 PNG 解析
+except ImportError:  # fall back to plain PNG parsing when Pillow is unavailable
     Image = None
 
 
@@ -25,7 +27,7 @@ def main():
         bg = args[i + 1].lstrip("#")
         args = args[:i] + args[i + 2:]
     if Image is None:
-        print("需要 Pillow：pip install pillow")
+        print("Pillow is required: pip install pillow")
         return 1
     im = Image.open(path).convert("RGB")
     w, h = im.size
@@ -37,7 +39,7 @@ def main():
     x1 = min(w, x1); y1 = min(h, y1)
     px = im.load()
     if bg is None:
-        # 以左上角像素作为背景色参考
+        # use the top-left pixel as the background color reference
         bg = px[x0, y0]
         bg = "%02X%02X%02X" % bg
     br = int(bg[0:2], 16); bgc = int(bg[2:4], 16); bb = int(bg[4:6], 16)
@@ -62,7 +64,7 @@ def main():
         print("bbox=(%d,%d)-(%d,%d) size=%dx%d" %
               (minx, miny, maxx, maxy, maxx - minx + 1, maxy - miny + 1))
     else:
-        print("bbox=(none)  —— 该区域与背景同色")
+        print("bbox=(none)  -- region has the same color as the background")
     return 0
 
 

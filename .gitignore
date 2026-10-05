@@ -1,4 +1,4 @@
-# 构建产物
+# Build output
 build/
 *.exe
 *.o
@@ -9,13 +9,13 @@ build/
 *.pdb
 *.exp
 
-# 取证用的位图（截图已转成 docs/screenshots/*.png 入库）
+# Evidence bitmaps (screenshots are committed as docs/screenshots/*.png)
 *.bmp
 
-# 内部交接文档，不随仓库发布
+# Internal handover notes, not published with the repository
 CONTINUE_PROMPT.md
 
-# 编辑器 / 系统
+# Editors / OS
 .vscode/
 .idea/
 *.swp

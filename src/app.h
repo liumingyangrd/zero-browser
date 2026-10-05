@@ -50,13 +50,14 @@ struct TabState {
 class BrowserApp {
 public:
     BrowserApp(HINSTANCE inst);
-    // visible=false 时不显示窗口，仅用于 --shot 无窗口渲染诊断。
+    // When visible=false no window is shown; used only for --shot headless rendering diagnostics.
     bool CreateMainWindow(bool visible = true, int width = 1180,
                           int height = 820);
     int Run();
 
-    // 非交互式截图诊断（--shot）。复用真实 Render / OnLButtonDown 代码路径，
-    // 但不依赖桌面窗口截图，所以在无桌面/受限会话里也能取证。
+    // Non-interactive screenshot diagnostics (--shot). Reuses the real Render /
+    // OnLButtonDown code paths, but does not rely on desktop window capture, so it
+    // can still gather evidence in a headless/restricted session.
     struct ShotOptions {
         std::string url;
         std::string out;
@@ -65,16 +66,18 @@ public:
         int height = 820;
         int wait_ms = 6000;
         int after_ms = 1500;
-        // 可选：导航后先把页面滚动到指定 y（文档坐标），用于验证 fixed 悬浮。
+        // Optional: after navigation, first scroll the page to the given y (document
+        // coordinates), used to verify fixed overlays.
         int scroll = 0;
-        // 可重复的 --click X,Y，按顺序依次投递给真实的 OnLButtonDown。
+        // Repeatable --click X,Y, dispatched in order to the real OnLButtonDown.
         std::vector<std::pair<int, int>> clicks;
-        // 地址栏输入测试：--set-address 设置内容，--focus-address 聚焦，
-        // --type 逐字符走真实的 OnChar 路径（用于回归「输入即崩溃」这类问题）。
+        // Address bar input test: --set-address sets the content, --focus-address
+        // focuses it, --type feeds characters one by one through the real OnChar path
+        // (regression for "typing crashes immediately").
         std::string set_address;
         bool focus_address = false;
         std::string type_text;
-        // 按 VK_BACK 走真实的 OnKey 路径，N 次（回归「按码点退格」）。
+        // Drive the real OnKey path with VK_BACK, N times (regression for "backspace by code point").
         int backspace = 0;
         bool dump_boxes = false;
     };
@@ -122,7 +125,8 @@ private:
     std::string CurrentUrl() const;
     TabState& ActiveTab();
     const TabState& ActiveTab() const;
-    // 标签宽度只在标签数量/窗口宽度变化时变，绘制与命中测试必须同源。
+    // Tab width only changes with the tab count/window width; painting and hit
+    // testing must share the same source.
     int TabWidth() const {
         int n = (int)tabs_.size();
         return std::max(70, std::min(190, (width_ - 70) / std::max(1, n)));

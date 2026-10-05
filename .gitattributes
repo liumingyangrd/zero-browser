@@ -1,10 +1,10 @@
-# 统一换行：源码在仓库与检出时都用 LF
+# Line endings: source files are LF both in the repository and on checkout
 * text=auto eol=lf
 
-# 批处理必须保持 CRLF，否则 cmd 解析 label/goto 会出问题
+# Batch files must stay CRLF, otherwise cmd.exe mis-parses labels and goto
 *.bat text eol=crlf
 
-# 二进制资源不要做换行转换
+# Binary assets must not be newline-converted
 *.png binary
 *.jpg binary
 *.jpeg binary

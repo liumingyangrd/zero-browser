@@ -1,12 +1,15 @@
-// make_clip: 生成一段“内容明显”的测试视频（不参与浏览器本体）。
+// make_clip: generate a test video with "obviously visible content" (this tool is not
+// part of the browser itself).
 //
-// 动机：仓库里原有的 sample.wmv 几乎整帧全黑（只有一个小白点），肉眼无法判断
-// 画面到底有没有在动，导致“黑屏 = 播放失败”的误判。
+// Motivation: the sample.wmv that shipped with the repo is almost entirely black (only
+// one small white dot), so the eye cannot tell whether the picture is actually moving,
+// which leads to the false conclusion "black screen = playback failure".
 //
-// 这里用 Media Foundation 的 Sink Writer（系统编码能力，只当作“底层管道”）把
-// 逐帧 GDI 绘制的动画编码成 WMV：移动色块 + 帧号 + 进度条，播放时一眼可辨。
+// This tool uses the Media Foundation Sink Writer (the system encoding capability, used
+// here only as a "low-level pipe") to encode a per-frame GDI-drawn animation into WMV:
+// moving color blocks + frame number + progress bar, unmistakable while playing.
 //
-// 用法: make_clip <输出.wmv> [帧数] [宽] [高] [fps]
+// Usage: make_clip <output.wmv> [frames] [width] [height] [fps]
 
 #include <windows.h>
 #include <mfapi.h>
@@ -21,7 +24,7 @@
 #include <string>
 #include <vector>
 
-// WMV3 在部分 MinGW 头文件里没有声明，这里自带一份 GUID。
+// WMV3 is not declared in some MinGW headers, so we carry our own GUID here.
 static const GUID kZbWmv3 = {
     0x31564D57, 0x0000, 0x0010,
     {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
@@ -37,7 +40,8 @@ void SafeRelease(T** p) {
 }
 
 void FillPattern(HDC dc, int w, int h, int frame, int total) {
-    // 背景做成随时间变化的渐变色块，肉眼一看就知道在动。
+    // Make the background a gradient block that changes over time, so the motion is
+    // obvious to the eye.
     int phase = (frame * 6) % 360;
     for (int y = 0; y < h; y += 4) {
         int t = (phase + y * 180 / h) % 360;
@@ -50,7 +54,7 @@ void FillPattern(HDC dc, int w, int h, int frame, int total) {
         DeleteObject(br);
     }
 
-    // 移动的白色方块：位置随帧号横向平移。
+    // Moving white square: its position shifts horizontally with the frame number.
     int box = h / 5;
     int x = (int)((double)(w - box) * (double)frame / (double)(total - 1));
     RECT marker{x, h / 2 - box / 2, x + box, h / 2 + box / 2};
@@ -58,7 +62,7 @@ void FillPattern(HDC dc, int w, int h, int frame, int total) {
     FillRect(dc, &marker, white);
     DeleteObject(white);
 
-    // 帧号 + 时间文本。
+    // Frame number + time text.
     char label[64];
     std::snprintf(label, sizeof(label), "FRAME %d / %d", frame + 1, total);
     SetBkMode(dc, TRANSPARENT);
@@ -72,7 +76,7 @@ void FillPattern(HDC dc, int w, int h, int frame, int total) {
     SelectObject(dc, old_font);
     DeleteObject(font);
 
-    // 底部进度条。
+    // Bottom progress bar.
     RECT track{16, h - 28, w - 16, h - 14};
     HBRUSH dark = CreateSolidBrush(RGB(30, 41, 59));
     FillRect(dc, &track, dark);
@@ -111,7 +115,8 @@ struct BmpInfoHeader {
 };
 #pragma pack(pop)
 
-// 把送进编码器之前的帧存盘，用于隔离“绘制 / 编码 / 解码 / 浏览器绘制”四段。
+// Save the frame from before it enters the encoder, to isolate the four stages
+// "drawing / encoding / decoding / browser painting".
 bool SaveBmp32(const char* path, const void* bits, int w, int h) {
     const uint8_t* src = (const uint8_t*)bits;
     std::vector<uint8_t> copy((size_t)w * h * 4);
@@ -211,7 +216,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // 逐帧用 GDI 画到 DIB，再送进编码器。
+    // Draw each frame with GDI into a DIB, then feed it to the encoder.
     BITMAPINFO bi{};
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bi.bmiHeader.biWidth = w;

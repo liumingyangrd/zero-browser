@@ -57,7 +57,8 @@ std::shared_ptr<Image> DecodeImage(const uint8_t* data, size_t len) {
                                    (UINT)out->bgra.size(), out->bgra.data());
     }
     if (SUCCEEDED(hr)) {
-        // 转成 premultiplied alpha，GDI AlphaBlend 才能正确合成透明 PNG。
+        // Convert to premultiplied alpha so GDI AlphaBlend can composite
+        // transparent PNG correctly.
         for (size_t i = 0; i + 3 < out->bgra.size(); i += 4) {
             uint8_t a = out->bgra[i + 3];
             if (a == 255) continue;

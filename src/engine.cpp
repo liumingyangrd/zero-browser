@@ -39,7 +39,7 @@ const char* kHomeHtml = R"HTML(<!DOCTYPE html>
     <div class="card"><h3>CSS 引擎</h3><p>选择器（类/ID/后代/属性/结构伪类）、盒模型、flex 与 grid 布局、position 定位与 z-index。</p><p><a href="about:css">查看 CSS 能力</a></p></div>
     <div class="card"><h3>媒体与绘制</h3><p>图片/背景图经 WIC 解码、视频帧经 Media Foundation 解码，缩放、裁剪、合成与滚动全部自研。</p></div>
   </div>
-  <div class="foot">Zero Browser 0.1 · 自研渲染内核 · 页面由 zero-browser 渲染</div>
+  <div class="foot">Zero Browser 0.1.1 · 自研渲染内核 · 页面由 zero-browser 渲染</div>
 </body></html>
 )HTML";
 
@@ -118,7 +118,7 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
       <tr><td>布局引擎</td><td>内置（block / inline / flex / grid / position）</td></tr>
       <tr><td>传输与解码</td><td>WinHTTP / Media Foundation / WIC / WASAPI（仅底层管道）</td></tr>
       <tr><td>渲染</td><td>GDI 像素输出，无 WebView / Chromium</td></tr>
-      <tr><td>版本</td><td>0.1</td></tr>
+      <tr><td>版本</td><td>0.1.1</td></tr>
     </table>
   </div>
 </body></html>

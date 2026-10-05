@@ -83,31 +83,12 @@ struct Style {
     int shadow_blur = 0;
     int shadow_spread = 0;
     std::string shadow_color = "rgba(0,0,0,0.2)";
-    // background
+    // 背景（平铺方式与定位）
     std::string background_repeat = "repeat";
     std::string background_position = "0% 0%";
     Length background_position_x;
     Length background_position_y;
     bool has_background_position = false;
-    // ::before / ::after 生成内容（只保留图标/标签最常用的属性，避免递归结构）
-    struct Pseudo {
-        bool present = false;
-        bool has_content = false;
-        std::string content;
-        std::string color;
-        int font_size = 0;    // 0 = 继承
-        int font_weight = 0;  // 0 = 继承
-        std::string display;
-        Length width;
-        Length height;
-        Length margin[4];
-        Length padding[4];
-        std::string background;
-        int border_radius = 0;
-        std::string text_align;
-    };
-    Pseudo before;
-    Pseudo after;
 
     int PaddingTop() const { return Resolve(padding[0], 0, 0); }
     int PaddingRight() const { return Resolve(padding[1], 0, 0); }

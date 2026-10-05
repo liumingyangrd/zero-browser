@@ -66,6 +66,25 @@ CSS 支持标签 / 类 / id / 后代 / `>` / 逗号分组 / `*` / **属性选择
 
 > 当前只做到**渲染**：还不能在输入框里打字、不能提交表单（见[尚未实现](#尚未实现)）。
 
+### 真实站点
+
+优化了资源加载（并行 + 会话复用）、CSS 解析（`@media` 嵌套块）、长度解析
+（`max-content` / `calc()` / `vh` 等，之前会被解析成 0 导致整页宽度为 0）之后，
+可以直接打开真实网站并读到内容：
+
+| 站点 | 结果 |
+| --- | --- |
+| **B 站** `https://www.bilibili.com/` | 顶部导航、频道分类、视频卡片标题 / UP 主 / 日期均可读 |
+| **洛谷** `https://www.luogu.com.cn/` | 先识别并完成「JS 设置 Cookie 后重载」的反爬挑战，再渲染出 banner、倒计时、题单入口 |
+
+![B 站首页](docs/screenshots/bilibili.png)
+
+![洛谷首页](docs/screenshots/luogu.png)
+
+> 这两张是**真实抓取**的结果，不是本地仿制页。版式仍比 Edge 粗糙，原因见
+> [尚未实现](#尚未实现)：CSS 变量 `var()` 尚未支持、没有 JS，因此依赖脚本的
+> 交互（登录、播放、缩略图懒加载）仍然不可用。
+
 ---
 
 ## 系统边界
@@ -284,13 +303,16 @@ build\atomic_check.exe 2000
 
 ## 尚未实现
 
-- **JavaScript**：所有 `<script>` 被忽略。Vue / React 等 SPA 页面只会显示其静态 HTML 骨架，
-  这也是目前访问洛谷、B 站这类站点的最大障碍
+- **JavaScript**：没有 JS 引擎，`<script>` 一律不执行。SPA 页面只能显示服务端返回的静态
+  HTML；登录、播放、下拉加载、懒加载缩略图（`data-src`）等依赖脚本的行为不可用。
+  唯一的例外是**反爬挑战页**：识别「JS 设置 Cookie 后重载」这一固定写法并模拟（洛谷就是靠它进去的）
+- **CSS 变量**：`var(--x)` 尚未解析，现代站点大量用它定义颜色/间距/尺寸，
+  因此 B 站、洛谷这类站点的版式会明显比 Edge 粗糙（颜色回退成默认值、间距丢失）
 - **流媒体**：HLS / DASH / m3u8 分片拉流未实现，目前只支持直链媒体文件
 - **表单交互**：控件能渲染，但还不能输入文字、聚焦切换、提交表单（无 `form` 提交与 `Enter` 行为）
-- **CSS 进阶**：`float`、`@media`、`position: sticky`、`transform`/`transition`/`animation`、
-  `flex-wrap`、`grid-template-areas`、伪元素 `::before`/`::after`
-- **定位精度**：`absolute` 目前以**父盒 content box** 为基准，尚未严格实现“最近 positioned 祖先”
+- **CSS 进阶**：`float`、`position: sticky`、`transform`/`transition`/`animation`、
+  `flex-wrap`、伪元素 `::before`/`::after`（`@media` 已支持桌面宽度分支）
+- **定位精度**：`absolute` 目前以**父盒 content box** 为基准，尚未严格实现"最近 positioned 祖先"
 - **图片进阶**：GIF 动图只显示第一帧；`<canvas>`、`<svg>`、`srcset`、`object-fit` 未实现
 - **状态与存储**：没有 localStorage、HTTP 缓存、下载管理、书签持久化
 - **Cookie 界面**：已有基础 jar，但还没有查看/清除入口，也不做第三方 Cookie 与 SameSite 策略

@@ -32,12 +32,22 @@ const int kAddrPadX = 12;
 const int kAddrFont = 15;
 
 // 取 UTF-8 文本里 i 之前一个码点的起始下标（i 需落在码点边界上）。
+// 必须先把空串和 i==0 挡掉：否则 i 被钳成 0 之后 i-1 会下溢成 SIZE_MAX，
+// 下一行的 s[j] 就是越界读（曾经导致「地址栏为空时一输入就崩溃」）。
 size_t Utf8PrevIndex(const std::string& s, size_t i) {
-    if (i == 0) return 0;
+    if (s.empty()) return 0;
     if (i > s.size()) i = s.size();
+    if (i == 0) return 0;
     size_t j = i - 1;
     while (j > 0 && ((unsigned char)s[j] & 0xC0) == 0x80) j--;
     return j;
+}
+
+// 把下标吸附到不超过 i 的码点边界上（i 落在边界上时原样返回）。
+size_t Utf8SnapToBoundary(const std::string& s, size_t i) {
+    if (i >= s.size()) return s.size();
+    while (i > 0 && ((unsigned char)s[i] & 0xC0) == 0x80) i--;
+    return i;
 }
 
 // 取 i 处码点之后的下标。
@@ -922,6 +932,50 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         PumpMessages(50);
     }
 
+    // 地址栏输入回归：先（可选）设置内容，再（可选）聚焦，最后逐字符走 OnChar。
+    if (!opt.set_address.empty() || opt.focus_address) {
+        if (!opt.set_address.empty()) {
+            address_text_ = opt.set_address;
+            if (address_text_ == "\\empty") address_text_.clear();
+        }
+        if (opt.focus_address) address_focused_ = true;
+        caret_ = (int)address_text_.size();
+        std::printf("[address] set='%s' focused=%d caret=%d\n",
+                    address_text_.c_str(), address_focused_ ? 1 : 0, caret_);
+    }
+    if (!opt.type_text.empty()) {
+        address_focused_ = true;
+        int typed = 0;
+        for (size_t i = 0; i < opt.type_text.size();) {
+            unsigned char c = (unsigned char)opt.type_text[i];
+            size_t len = 1;
+            if (c >= 0xF0) len = 4;
+            else if (c >= 0xE0) len = 3;
+            else if (c >= 0xC0) len = 2;
+            std::string one = opt.type_text.substr(i, len);
+            std::wstring wide = Utf8ToWide(one);
+            for (wchar_t wc : wide) OnChar(wc);
+            typed++;
+            i += len;
+        }
+        std::string hex;
+        for (unsigned char c : address_text_) {
+            char buf[4];
+            std::snprintf(buf, sizeof(buf), "%02x ", c);
+            hex += buf;
+        }
+        std::printf("[address] typed=%d bytes=%zu caret=%d hex=%s\n", typed,
+                    address_text_.size(), caret_, hex.c_str());
+        PumpMessages(100);
+    }
+    if (opt.backspace > 0) {
+        address_focused_ = true;
+        for (int i = 0; i < opt.backspace; ++i) OnKey(VK_BACK);
+        std::printf("[address] backspace=%d bytes=%zu caret=%d\n",
+                    opt.backspace, address_text_.size(), caret_);
+        PumpMessages(100);
+    }
+
     if (opt.dump_boxes && active_ >= 0 && active_ < (int)tabs_.size()) {
         const TabState& tab = tabs_[active_];
         std::printf("== 布局树 ==\n");
@@ -1455,8 +1509,8 @@ void BrowserApp::OnChar(wchar_t ch) {
     std::string s = WideToUtf8(ws);
     if (caret_ < 0) caret_ = 0;
     if (caret_ > (int)address_text_.size()) caret_ = (int)address_text_.size();
-    // 插入点必须落在码点边界上，否则 substr / 删除都会切坏字符。
-    caret_ = (int)Utf8PrevIndex(address_text_, (size_t)caret_ + 1);
+    // 插入点吸附到码点边界（caret_ 正常时就是它自己，不会移位）。
+    caret_ = (int)Utf8SnapToBoundary(address_text_, (size_t)caret_);
     address_text_.insert((size_t)caret_, s);
     caret_ += (int)s.size();
     caret_visible_ = true;

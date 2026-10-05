@@ -175,8 +175,18 @@ build\zero-browser.exe --shot --url http://127.0.0.1:8765/images.html   --out bu
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/grid.html     --out build\grid.bmp --wait 1200 --size 1100x1000 --dump-boxes
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/forms.html    --out build\forms.bmp --wait 1200 --size 900x760 --dump-boxes
 
-:: 网络诊断（注意：URL 直接跟在 --net-test 后面）
+:: 网络诊断（注意：URL 直接跟在 --net-test 后面；第三个参数可选，把正文导出成文件）
 build\zero-browser.exe --net-test http://example.com/
+build\zero-browser.exe --net-test https://www.bilibili.com/ build\bili.html
+
+:: 地址栏输入回归（走真实的 OnChar / OnKey 路径，覆盖「输入即崩溃」这类问题）
+::   --set-address "\empty"  表示清空地址栏
+build\zero-browser.exe --shot --url browser://home --out build\addr.bmp --wait 300 ^
+    --size 900x600 --set-address "\empty" --focus-address --type "http://a.cn"
+::   期望：[address] typed=11 bytes=11 caret=11 hex=68 74 74 70 ...（且不崩溃）
+build\zero-browser.exe --shot --url browser://home --out build\addr2.bmp --wait 300 ^
+    --size 900x600 --set-address "a中b" --focus-address --backspace 3
+::   期望：[address] backspace=3 bytes=1 caret=1（按 UTF-8 码点退格，不切坏汉字）
 
 :: Cookie 端到端：先开本地 cookie 测试服务器
 python tools\cookie_server.py 8899
@@ -437,6 +447,18 @@ zero-browser/
     编译报一堆莫名其妙的错。批量替换请用编辑器/补丁工具，或用显式 `[System.IO.File]::ReadAllText`
     （UTF-8）+ `WriteAllBytes`。若已中招：这类损坏可逆，把文件按 GBK 解码、再按 UTF-8 写回即可
     去掉乱码，剩余少量丢字节的位置（特征是「汉字前两字节 + `?`」）按上下文补回即可。
+22. **UTF-8 辅助函数里最容易踩的是 `size_t` 下溢，而不是编码本身。**
+    曾经的写法是：
+    ```cpp
+    if (i > s.size()) i = s.size();   // 空串时 i 被钳成 0
+    size_t j = i - 1;                 // 0 - 1 下溢成 SIZE_MAX
+    while (j > 0 && ((unsigned char)s[j] & 0xC0) == 0x80) j--;   // s[SIZE_MAX] 越界读
+    ```
+    这个函数在**每次按键**时都会被调用（把光标吸附到码点边界），于是「地址栏为空时一输入就
+    崩溃」——因为它会从 `data()-1` 一路向前扫，直到踩到未映射内存。修法是先挡空串与 `i == 0`，
+    并把「吸附边界」拆成独立函数（`Utf8SnapToBoundary`），不要再借用 `Utf8PrevIndex` 去实现它；
+    顺带还修掉了「字符被插到最后一个字符前面」的错位。回归手段：
+    `--set-address "\empty" --focus-address --type "http://a.cn"` 必须输出 `hex=68 74 74 70 ...` 且不崩溃。
 
 ---
 

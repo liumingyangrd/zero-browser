@@ -54,6 +54,16 @@ static int RunShotMode(int argc, char** argv) {
             opt.scroll = std::atoi(v.c_str());
         } else if (a == "--dump-boxes") {
             opt.dump_boxes = true;
+        } else if (a == "--set-address") {
+            next(&opt.set_address);
+        } else if (a == "--focus-address") {
+            opt.focus_address = true;
+        } else if (a == "--type") {
+            next(&opt.type_text);
+        } else if (a == "--backspace") {
+            std::string v;
+            next(&v);
+            opt.backspace = std::atoi(v.c_str());
         } else if (a == "--click") {
             std::string v;
             next(&v);

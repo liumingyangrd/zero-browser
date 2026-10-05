@@ -69,6 +69,13 @@ public:
         int scroll = 0;
         // 可重复的 --click X,Y，按顺序依次投递给真实的 OnLButtonDown。
         std::vector<std::pair<int, int>> clicks;
+        // 地址栏输入测试：--set-address 设置内容，--focus-address 聚焦，
+        // --type 逐字符走真实的 OnChar 路径（用于回归「输入即崩溃」这类问题）。
+        std::string set_address;
+        bool focus_address = false;
+        std::string type_text;
+        // 按 VK_BACK 走真实的 OnKey 路径，N 次（回归「按码点退格」）。
+        int backspace = 0;
         bool dump_boxes = false;
     };
     bool HeadlessShot(const ShotOptions& opt);

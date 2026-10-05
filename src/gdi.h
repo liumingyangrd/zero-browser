@@ -21,7 +21,10 @@ public:
 
     void Init(int width, int height);
     size_t MeasureText(const std::string& utf8, int font_size,
-                       bool bold, int max_width = 0) const override;
+                       bool bold, int max_width = 0,
+                       bool italic = false) const override;
+    int TextHeight(int font_size, bool bold = false,
+                   bool italic = false) const override;
     void DrawText(const std::string& utf8, int x, int y,
                   int font_size, uint32_t rgb, bool bold,
                   bool italic, bool underline) override;
@@ -30,7 +33,8 @@ public:
     void FillRoundRect(int x, int y, int w, int h, int radius, uint32_t rgb);
     void StrokeRect(int x, int y, int w, int h, uint32_t rgb);
     void StrokeLine(int x1, int y1, int x2, int y2, uint32_t rgb, int width = 1);
-    void StrokeArc(const Rect& rc, int start, int sweep, uint32_t rgb);
+    void StrokeArc(const Rect& rc, int start, int sweep, uint32_t rgb,
+                   int width = 2) override;
 
     int Width() const { return width_; }
     int Height() const { return height_; }
@@ -42,7 +46,19 @@ public:
                    int dst_y, int dst_w, int dst_h) override;
 
 private:
-    mutable std::map<std::pair<int, bool>, HFONT> fonts_;
+    struct FontKey {
+        int size = 0;
+        bool bold = false;
+        bool italic = false;
+        bool operator<(const FontKey& o) const {
+            if (size != o.size) return size < o.size;
+            if (bold != o.bold) return bold < o.bold;
+            return italic < o.italic;
+        }
+    };
+    HFONT FontFor(int font_size, bool bold, bool italic) const;
+
+    mutable std::map<FontKey, HFONT> fonts_;
     HDC dc_ = nullptr;
     int width_ = 0;
     int height_ = 0;

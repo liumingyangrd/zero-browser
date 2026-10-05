@@ -2,7 +2,9 @@
 
 #include "network.h"
 
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -16,6 +18,61 @@ namespace {
 const wchar_t* kClassW = L"ZeroBrowserSelfBuilt";
 
 const UINT kMsgNavigationDone = WM_APP + 1;
+
+// 工具栏与地址栏的统一几何。绘制、命中测试、光标定位必须共用这几个常量，
+// 否则改一处忘一处就会出现「看到的位置点不中」这类问题。
+const int kToolbarTop = 38;
+const int kToolbarY = 44;
+const int kToolbarH = 40;
+const int kBtnSize = 30;
+const int kBtnHeight = 28;
+const int kAddrX = 140;
+const int kAddrH = 30;
+const int kAddrPadX = 12;
+const int kAddrFont = 15;
+
+// 取 UTF-8 文本里 i 之前一个码点的起始下标（i 需落在码点边界上）。
+size_t Utf8PrevIndex(const std::string& s, size_t i) {
+    if (i == 0) return 0;
+    if (i > s.size()) i = s.size();
+    size_t j = i - 1;
+    while (j > 0 && ((unsigned char)s[j] & 0xC0) == 0x80) j--;
+    return j;
+}
+
+// 取 i 处码点之后的下标。
+size_t Utf8NextIndex(const std::string& s, size_t i) {
+    if (i >= s.size()) return s.size();
+    unsigned char c = (unsigned char)s[i];
+    size_t len = 1;
+    if (c >= 0xF0) len = 4;
+    else if (c >= 0xE0) len = 3;
+    else if (c >= 0xC0) len = 2;
+    if (i + len > s.size()) len = 1;
+    return i + len;
+}
+
+// 把文本截断到 max_w 像素内，超长以 … 结尾。按码点切，不会切坏汉字。
+std::string EllipsizeText(Canvas& canvas, const std::string& text,
+                          int font_size, bool bold, int max_w) {
+    if (max_w <= 0) return "";
+    if ((int)canvas.MeasureText(text, font_size, bold) <= max_w) return text;
+    const std::string dots = "…";
+    int dots_w = (int)canvas.MeasureText(dots, font_size, bold);
+    std::string out;
+    size_t i = 0;
+    while (i < text.size()) {
+        size_t next = Utf8NextIndex(text, i);
+        std::string candidate = out + text.substr(i, next - i);
+        if ((int)canvas.MeasureText(candidate, font_size, bold) + dots_w >
+            max_w) {
+            break;
+        }
+        out = candidate;
+        i = next;
+    }
+    return out + dots;
+}
 
 #pragma pack(push, 1)
 struct BmpFileHeader {
@@ -313,6 +370,22 @@ std::string Base64Decode(const std::string& s) {
 // HTML 结构、布局、绘制仍由浏览器自己负责。
 void LoadImagesForHtml(const std::string& html, const std::string& base_url,
                        std::map<std::string, std::shared_ptr<Image>>& out) {
+    // 先把需要抓的 URL 收集齐，再并行取回。
+    // 早期实现是边扫边串行 fetch：每个资源都新建 WinHTTP 会话（重复 TLS 握手），
+    // 真实站点几十个图片/CSS url() 会把首屏拖到几十秒甚至永远加载不完。
+    std::vector<std::string> remote;
+    auto need_remote = [&](const std::string& abs) {
+        if (!StartsWith(abs, "http://") && !StartsWith(abs, "https://")) {
+            return false;
+        }
+        if (out.count(abs)) return false;
+        for (const auto& u : remote) {
+            if (u == abs) return false;
+        }
+        remote.push_back(abs);
+        return true;
+    };
+
     std::string lower = ToLowerAscii(html);
     size_t pos = 0;
     while (true) {
@@ -342,10 +415,8 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
             path = PercentDecode(path);
             std::string bytes = ReadFileBinary(path);
             if (!bytes.empty()) image = DecodeImage(bytes);
-        } else if (StartsWith(abs, "http://") || StartsWith(abs, "https://")) {
-            FetchResult res;
-            FetchBinaryWithCookies(abs, &res, 15000);
-            if (!res.html.empty()) image = DecodeImage(res.html);
+        } else {
+            need_remote(abs);
         }
 
         if (image) {
@@ -355,7 +426,7 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
     }
 
     // CSS 里的 background-image: url(...)（外部样式表已内联进 <style>）。
-    // 相对路径以页面地址为基准（外部 CSS 文件本身的相对基准暂不支持）。
+    // 相对路径以页面地址为基准（外部 CSS 内部的相对 url 已在内联时改写为绝对）。
     std::string lower_all = ToLowerAscii(html);
     pos = 0;
     while (true) {
@@ -376,11 +447,6 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         if (u.empty() || StartsWith(u, "data:")) continue;
         std::string abs = ResolveUrl(base_url, u);
         if (out.count(abs)) continue;
-        if (!StartsWith(abs, "http://") && !StartsWith(abs, "https://") &&
-            !StartsWith(abs, "file://")) {
-            continue;
-        }
-        std::shared_ptr<Image> image;
         if (StartsWith(abs, "file://")) {
             std::string path = abs.substr(7);
             if (path.size() > 2 && (path[0] == '/' || path[0] == '\\') &&
@@ -389,17 +455,69 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
             }
             path = PercentDecode(path);
             std::string bytes = ReadFileBinary(path);
-            if (!bytes.empty()) image = DecodeImage(bytes);
+            if (!bytes.empty()) {
+                auto image = DecodeImage(bytes);
+                if (image) {
+                    image->source_url = abs;
+                    out[abs] = std::move(image);
+                }
+            }
         } else {
-            FetchResult res;
-            FetchBinaryWithCookies(abs, &res, 15000);
-            if (!res.html.empty()) image = DecodeImage(res.html);
-        }
-        if (image) {
-            image->source_url = abs;
-            out[abs] = std::move(image);
+            need_remote(abs);
         }
     }
+
+    if (remote.empty()) return;
+    std::vector<FetchResult> results;
+    FetchManyParallel(remote, 6, &results, 15000, true, base_url);
+    for (size_t i = 0; i < remote.size() && i < results.size(); ++i) {
+        if (results[i].html.empty()) continue;
+        auto image = DecodeImage(results[i].html);
+        if (image) {
+            image->source_url = remote[i];
+            out[remote[i]] = std::move(image);
+        }
+    }
+}
+
+// 把外部 CSS 里的相对 url(...) 补成绝对地址。
+// 外部样式表会被内联进 <style>，之后 url() 会按“页面地址”解析，
+// 而 CSS 里的相对路径本应以“CSS 文件自身的地址”为基准——不修就会出现
+// 背景图/字体全部 404 的情况（真实站点几乎都是相对路径）。
+std::string AbsolutizeCssUrls(const std::string& css,
+                              const std::string& css_url) {
+    std::string out;
+    std::string lower = ToLowerAscii(css);
+    size_t pos = 0;
+    while (true) {
+        size_t up = lower.find("url(", pos);
+        if (up == std::string::npos) {
+            out += css.substr(pos);
+            break;
+        }
+        out += css.substr(pos, up - pos);
+        size_t open = css.find('(', up);
+        size_t close = css.find(')', open);
+        if (open == std::string::npos || close == std::string::npos) {
+            out += css.substr(up);
+            break;
+        }
+        std::string v = Trim(css.substr(open + 1, close - open - 1));
+        std::string quote;
+        if (v.size() >= 2 && ((v.front() == '"' && v.back() == '"') ||
+                              (v.front() == '\'' && v.back() == '\''))) {
+            quote = v.substr(0, 1);
+            v = v.substr(1, v.size() - 2);
+        }
+        std::string lv = ToLowerAscii(v);
+        if (!v.empty() && !StartsWith(lv, "data:") && !StartsWith(lv, "http://") &&
+            !StartsWith(lv, "https://") && !StartsWith(v, "//")) {
+            v = ResolveUrl(css_url, v);
+        }
+        out += "url(" + quote + v + quote + ")";
+        pos = close + 1;
+    }
+    return out;
 }
 
 // Pull in external stylesheets so the self-built CSS engine sees them.
@@ -425,10 +543,10 @@ std::string InlineExternalStylesheets(const std::string& html,
             continue;
         }
         FetchResult css;
-        FetchUrlWithCookies(css_url, &css, 10000);
+        FetchUrlWithCookies(css_url, &css, 10000, base_url);
         if (!css.html.empty()) {
             injected += "\n<style>\n";
-            injected += css.html;
+            injected += AbsolutizeCssUrls(css.html, css_url);
             injected += "\n</style>\n";
             count++;
         }
@@ -442,6 +560,92 @@ std::string InlineExternalStylesheets(const std::string& html,
         out = injected + out;
     }
     return out;
+}
+
+// 处理「用 JS 设置 Cookie 再重载」的反爬挑战页（洛谷 / 部分国内站点使用）。
+// 这不是 JS 引擎，只识别挑战页里那几种固定写法：
+//   var X = ["\x61\x62", ...]          字符串数组（含 \xNN / \uNNNN 转义）
+//   xxx.cookie = "name=value; ..."     写 Cookie（含 xxx[Y[0]].cookie 这类间接写法）
+//   window.open("URL","_self") / location.href="URL" / location.replace("URL")
+// 命中后由 LoadUrlSource 把 Cookie 写进 jar 并重新抓取，等价于浏览器执行这段脚本。
+struct CookieChallenge {
+    bool found = false;
+    std::string cookie;
+    std::string redirect;
+};
+
+std::string UnescapeJsString(const std::string& s) {
+    std::string out;
+    auto hexval = [](char h) -> int {
+        if (h >= '0' && h <= '9') return h - '0';
+        if (h >= 'a' && h <= 'f') return h - 'a' + 10;
+        if (h >= 'A' && h <= 'F') return h - 'A' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] != '\\' || i + 1 >= s.size()) {
+            out.push_back(s[i]);
+            continue;
+        }
+        char c = s[++i];
+        if (c == 'x' && i + 2 < s.size()) {
+            int hi = hexval(s[i + 1]);
+            int lo = hexval(s[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out.push_back((char)(hi * 16 + lo));
+                i += 2;
+                continue;
+            }
+        }
+        if (c == 'n') { out.push_back('\n'); continue; }
+        if (c == 'r') { out.push_back('\r'); continue; }
+        if (c == 't') { out.push_back('\t'); continue; }
+        out.push_back(c);
+    }
+    return out;
+}
+
+// 取 key 之后第一个引号串（跳过 = 与空白），并做 JS 转义还原。
+std::string FirstQuotedAfter(const std::string& html, size_t from) {
+    size_t q1 = html.find('"', from);
+    if (q1 == std::string::npos) return "";
+    size_t q2 = html.find('"', q1 + 1);
+    if (q2 == std::string::npos) return "";
+    return UnescapeJsString(html.substr(q1 + 1, q2 - q1 - 1));
+}
+
+CookieChallenge DetectCookieChallenge(const std::string& html) {
+    CookieChallenge ch;
+    // 挑战页都很小；限制体积，避免在正常页面里误伤。
+    if (html.empty() || html.size() > 8192) return ch;
+    std::string lower = ToLowerAscii(html);
+    if (lower.find("cookie") == std::string::npos) return ch;
+
+    // .cookie = "..." 赋值（直接或经数组间接引用都归结为“找到那段字符串”）
+    size_t ck = lower.find(".cookie");
+    while (ck != std::string::npos) {
+        std::string v = FirstQuotedAfter(html, ck);
+        if (v.find('=') != std::string::npos) {
+            ch.cookie = v;
+            ch.found = true;
+        }
+        ck = lower.find(".cookie", ck + 7);
+    }
+
+    // 跳转目标
+    const char* keys[] = {"window.open(", "location.href", "location.replace(",
+                          "location.assign(", "document.location"};
+    for (const char* key : keys) {
+        size_t p = lower.find(ToLowerAscii(key));
+        if (p == std::string::npos) continue;
+        std::string u = FirstQuotedAfter(html, p);
+        if (!u.empty()) {
+            ch.redirect = u;
+            ch.found = true;
+            break;
+        }
+    }
+    return ch;
 }
 
 bool LoadUrlSource(const std::string& raw_url, std::string* html,
@@ -490,6 +694,20 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
         FetchUrlWithCookies(u, &res, 15000);
         if (!res.html.empty()) {
             std::string final = res.final_url.empty() ? u : res.final_url;
+            // 反爬挑战页（洛谷等）：响应是个小页面，脚本里设置 Cookie 再重载。
+            // 我们不是 JS 引擎，只识别这种固定写法，把 Cookie 写进 jar 后重新抓一次。
+            for (int round = 0; round < 2; ++round) {
+                CookieChallenge ch = DetectCookieChallenge(res.html);
+                if (!ch.found || ch.redirect.empty()) break;
+                if (!ch.cookie.empty()) CookieJarAbsorbText(final, ch.cookie);
+                std::string next = ResolveUrl(final, ch.redirect);
+                if (next.empty() || next == final) break;
+                FetchResult again;
+                if (!FetchUrlWithCookies(next, &again, 15000, final)) break;
+                if (again.html.size() <= res.html.size()) break;
+                res = again;
+                final = again.final_url.empty() ? next : again.final_url;
+            }
             *html = InlineExternalStylesheets(res.html, final);
             *final_url = final;
             error->clear();
@@ -602,10 +820,12 @@ void DumpBoxTree(const Box* box, const Rect& viewport, int scroll, int depth,
     int screen_x = viewport.x + box->rect.x;
     int screen_y =
         viewport.y + box->rect.y - (is_fixed ? 0 : scroll);
-    std::printf("%*sbox tag=%s doc=%d,%d,%d,%d screen=%d,%d%s\n", depth * 2, "",
-                box->node ? box->node->tag.c_str() : "(anon)", box->rect.x,
-                box->rect.y, box->rect.w, box->rect.h, screen_x, screen_y,
-                is_fixed ? " fixed" : "");
+    std::printf(
+        "%*sbox tag=%s doc=%d,%d,%d,%d screen=%d,%d bg=%s color=%s%s\n",
+        depth * 2, "", box->node ? box->node->tag.c_str() : "(anon)",
+        box->rect.x, box->rect.y, box->rect.w, box->rect.h, screen_x, screen_y,
+        box->style.background.empty() ? "-" : box->style.background.c_str(),
+        box->style.color.c_str(), is_fixed ? " fixed" : "");
     for (const auto& r : box->runs) {
         int rx = viewport.x + r.rect.x;
         int ry = viewport.y + r.rect.y - (is_fixed ? 0 : scroll);
@@ -853,7 +1073,7 @@ void BrowserApp::Render(Canvas& canvas) {
 void BrowserApp::RenderTabs(Canvas& canvas) {
     canvas.FillRect(0, 0, width_, 38, 0x0f172a);
     int n = (int)tabs_.size();
-    int tab_w = std::max(70, std::min(190, (width_ - 70) / std::max(1, n)));
+    int tab_w = TabWidth();
     int x = 8;
     for (int i = 0; i < n; ++i) {
         bool active = i == active_;
@@ -862,8 +1082,16 @@ void BrowserApp::RenderTabs(Canvas& canvas) {
                              active ? 0xffffff : 0x1e293b);
         const TabState& tab = tabs_[i];
         std::string label = tab.title.empty() ? "页面" : tab.title;
-        canvas.DrawText(label, r.x + 9, r.y + 7, 13,
-                        active ? 0x0f172a : 0x94a3b8, active, false, false);
+        // 标题要裁在关闭按钮左侧，否则长标题会压住 × 甚至溢出标签外。
+        const int kTabFont = 13;
+        int max_w = std::max(12, r.w - 9 - 26);
+        label = EllipsizeText(canvas, label, kTabFont, active, max_w);
+        int th = canvas.TextHeight(kTabFont, active);
+        canvas.Clip(Rect{r.x + 1, r.y + 1, std::max(1, r.w - 2), r.h - 2});
+        canvas.DrawText(label, r.x + 9, r.y + std::max(1, (r.h - th) / 2),
+                        kTabFont, active ? 0x0f172a : 0x94a3b8, active, false,
+                        false);
+        canvas.ResetClip();
         int cx = r.x + r.w - 14;
         int cy = r.y + r.h / 2;
         canvas.StrokeLine(cx - 4, cy - 4, cx + 4, cy + 4, active ? 0x64748b : 0x475569);
@@ -892,13 +1120,29 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     canvas.StrokeLine(fwd.x + 10, fwd.y + 8, fwd.x + 19, fwd.y + 14, 0x334155, 2);
     canvas.StrokeLine(fwd.x + 19, fwd.y + 14, fwd.x + 10, fwd.y + 20, 0x334155, 2);
 
-    // Reload.
+    // Reload：留缺口的圆环 + 箭头。
+    // 注意 Rect 是 {x, y, w, h}：之前按 {left,top,right,bottom} 传，
+    // w/h 变成 94/67，画出一个横跨到地址栏的巨型椭圆。
     Rect reload{72, 44, 30, 28};
     canvas.FillRoundRect(reload.x, reload.y, reload.w, reload.h, 6, 0xeef2f7);
-    canvas.StrokeArc({reload.x + 6, reload.y + 7, reload.x + 22, reload.y + 23},
-                     60, 270, 0x334155);
-    canvas.StrokeLine(reload.x + 17, reload.y + 14, reload.x + 22, reload.y + 10, 0x334155, 2);
-    canvas.StrokeLine(reload.x + 22, reload.y + 10, reload.x + 25, reload.y + 12, 0x334155, 2);
+    const double kPi = 3.14159265358979323846;
+    int rcx = reload.x + reload.w / 2;
+    int rcy = reload.y + reload.h / 2;
+    int rr = 7;
+    int arc_start = 60;   // 缺口留在右上角
+    int arc_sweep = 270;  // 逆时针扫 270°
+    canvas.StrokeArc({rcx - rr, rcy - rr, rr * 2, rr * 2}, arc_start,
+                     arc_sweep, 0x334155, 2);
+    // 箭头落在弧的起点上，方向取该点的切线，画成一个小 V 形箭头
+    double a0 = arc_start * kPi / 180.0;
+    int tip_x = rcx + (int)std::lround(rr * std::cos(a0));
+    int tip_y = rcy - (int)std::lround(rr * std::sin(a0));
+    for (int sign = -1; sign <= 1; sign += 2) {
+        double ba = a0 + kPi / 2 + sign * 0.45;  // 切线方向 ±26°
+        int bx = (int)std::lround(std::cos(ba) * 5.5);
+        int by = -(int)std::lround(std::sin(ba) * 5.5);
+        canvas.StrokeLine(tip_x, tip_y, tip_x - bx, tip_y - by, 0x334155, 2);
+    }
 
     // Home.
     Rect home{104, 44, 30, 28};
@@ -914,15 +1158,25 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     uint32_t border = address_focused_ ? 0x2563eb : 0xcbd5e1;
     canvas.FillRoundRect(addr.x, addr.y, addr.w, addr.h, 7, 0xffffff);
     canvas.StrokeRect(addr.x, addr.y, addr.w, addr.h, border);
+
+    // URL 文字：垂直居中，并裁剪在框内（长 URL 不能溢出到工具栏外）。
+    // 之前写成固定 addr.y + 8，字号 15 时文字底部正好压在/穿过下边框。
+    const int kAddrFont = 15;
+    const int kAddrPadX = 12;
+    int text_h = canvas.TextHeight(kAddrFont);
+    int text_y = addr.y + std::max(2, (addr.h - text_h) / 2 + 1);
     std::string shown = address_text_;
-    canvas.DrawText(shown, addr.x + 12, addr.y + 8, 15,
+    canvas.Clip(Rect{addr.x + 1, addr.y + 1, addr.w - 2, addr.h - 2});
+    canvas.DrawText(shown, addr.x + kAddrPadX, text_y, kAddrFont,
                     address_focused_ ? 0x0f172a : 0x334155, false, false, false);
     if (address_focused_ && caret_visible_) {
         size_t prefix_len = shown.substr(0, std::min(caret_, (int)shown.size())).size();
         std::string prefix = shown.substr(0, prefix_len);
-        int cx = addr.x + 12 + (int)canvas.MeasureText(prefix, 15, false);
-        canvas.StrokeLine(cx, addr.y + 7, cx, addr.y + 23, 0x2563eb, 2);
+        int cx = addr.x + kAddrPadX +
+                 (int)canvas.MeasureText(prefix, kAddrFont, false);
+        canvas.StrokeLine(cx, text_y, cx, text_y + text_h - 3, 0x2563eb, 2);
     }
+    canvas.ResetClip();
 }
 
 void BrowserApp::RenderPage(Canvas& canvas) {
@@ -962,9 +1216,9 @@ void BrowserApp::RenderStatus(Canvas& canvas) {
 }
 
 HitTest BrowserApp::HitTestPoint(int x, int y) const {
-    if (y < 38) {
+    if (y < kToolbarTop) {
         int n = (int)tabs_.size();
-        int tab_w = std::max(70, std::min(190, (width_ - 70) / std::max(1, n)));
+        int tab_w = TabWidth();
         int x0 = 8;
         for (int i = 0; i < n; ++i) {
             Rect r{x0, 7, tab_w, 28};
@@ -977,12 +1231,21 @@ HitTest BrowserApp::HitTestPoint(int x, int y) const {
         if (Rect{x0 + 4, 7, 30, 28}.contains(x, y)) return {HitArea::AddTab, -1};
         return {};
     }
-    if (y < 78) {
-        if (Rect{8, 44, 30, 28}.contains(x, y)) return {HitArea::Back, -1};
-        if (Rect{40, 44, 30, 28}.contains(x, y)) return {HitArea::Forward, -1};
-        if (Rect{72, 44, 30, 28}.contains(x, y)) return {HitArea::Reload, -1};
-        if (Rect{104, 44, 30, 28}.contains(x, y)) return {HitArea::Home, -1};
-        if (Rect{140, 44, std::max(1, width_ - 148), 30}.contains(x, y)) {
+    if (y < kToolbarTop + kToolbarH) {
+        if (Rect{8, kToolbarY, kBtnSize, kBtnHeight}.contains(x, y)) {
+            return {HitArea::Back, -1};
+        }
+        if (Rect{40, kToolbarY, kBtnSize, kBtnHeight}.contains(x, y)) {
+            return {HitArea::Forward, -1};
+        }
+        if (Rect{72, kToolbarY, kBtnSize, kBtnHeight}.contains(x, y)) {
+            return {HitArea::Reload, -1};
+        }
+        if (Rect{104, kToolbarY, kBtnSize, kBtnHeight}.contains(x, y)) {
+            return {HitArea::Home, -1};
+        }
+        if (Rect{kAddrX, kToolbarY, std::max(1, width_ - kAddrX - 8), kAddrH}
+                .contains(x, y)) {
             return {HitArea::Address, -1};
         }
         return {};
@@ -1052,7 +1315,24 @@ void BrowserApp::OnLButtonDown(int x, int y) {
     }
     if (hit.area == HitArea::Address) {
         address_focused_ = true;
-        caret_ = (int)address_text_.size();
+        // 按点击位置定位光标（原来一律跳到末尾，点中间也改不了插入点）。
+        int rel = x - (kAddrX + kAddrPadX);
+        size_t best_idx = 0;
+        int best_diff = std::abs(rel);
+        size_t idx = 0;
+        while (idx < address_text_.size()) {
+            idx = Utf8NextIndex(address_text_, idx);
+            int w = (int)measure_canvas_->MeasureText(
+                address_text_.substr(0, idx), kAddrFont, false);
+            int diff = std::abs(w - rel);
+            if (diff < best_diff) {
+                best_diff = diff;
+                best_idx = idx;
+            }
+            if (w > rel) break;
+        }
+        caret_ = (int)best_idx;
+        caret_visible_ = true;
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
@@ -1100,6 +1380,8 @@ void BrowserApp::OnMouseWheel(int delta) {
 
 void BrowserApp::OnKey(UINT key) {
     if (address_focused_) {
+        size_t caret = (size_t)std::max(0, caret_);
+        if (caret > address_text_.size()) caret = address_text_.size();
         if (key == VK_RETURN) {
             NavigateTo(address_text_, true);
             address_focused_ = false;
@@ -1114,32 +1396,44 @@ void BrowserApp::OnKey(UINT key) {
             return;
         }
         if (key == VK_BACK) {
-            if (caret_ > 0 && caret_ <= (int)address_text_.size()) {
-                address_text_.erase(address_text_.begin() + caret_ - 1);
-                caret_--;
+            // 按 UTF-8 码点删除：只删一个字节会把汉字切成半个（非法 UTF-8）。
+            if (caret > 0) {
+                size_t prev = Utf8PrevIndex(address_text_, caret);
+                address_text_.erase(prev, caret - prev);
+                caret_ = (int)prev;
+                caret_visible_ = true;
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
             return;
         }
         if (key == VK_DELETE) {
-            if (caret_ < (int)address_text_.size()) {
-                address_text_.erase(address_text_.begin() + caret_);
+            if (caret < address_text_.size()) {
+                size_t next = Utf8NextIndex(address_text_, caret);
+                address_text_.erase(caret, next - caret);
                 InvalidateRect(hwnd_, nullptr, FALSE);
             }
             return;
         }
         if (key == VK_LEFT) {
-            if (caret_ > 0) {
-                caret_--;
-                InvalidateRect(hwnd_, nullptr, FALSE);
-            }
+            caret_ = (int)Utf8PrevIndex(address_text_, caret);
+            caret_visible_ = true;
+            InvalidateRect(hwnd_, nullptr, FALSE);
             return;
         }
         if (key == VK_RIGHT) {
-            if (caret_ < (int)address_text_.size()) {
-                caret_++;
-                InvalidateRect(hwnd_, nullptr, FALSE);
-            }
+            caret_ = (int)Utf8NextIndex(address_text_, caret);
+            caret_visible_ = true;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        if (key == VK_HOME) {
+            caret_ = 0;
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        if (key == VK_END) {
+            caret_ = (int)address_text_.size();
+            InvalidateRect(hwnd_, nullptr, FALSE);
             return;
         }
         return;
@@ -1161,8 +1455,11 @@ void BrowserApp::OnChar(wchar_t ch) {
     std::string s = WideToUtf8(ws);
     if (caret_ < 0) caret_ = 0;
     if (caret_ > (int)address_text_.size()) caret_ = (int)address_text_.size();
+    // 插入点必须落在码点边界上，否则 substr / 删除都会切坏字符。
+    caret_ = (int)Utf8PrevIndex(address_text_, (size_t)caret_ + 1);
     address_text_.insert((size_t)caret_, s);
     caret_ += (int)s.size();
+    caret_visible_ = true;
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 

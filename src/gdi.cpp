@@ -1,7 +1,9 @@
 #include "gdi.h"
 
+#include <cmath>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 namespace zb {
 
@@ -66,22 +68,9 @@ std::string WideToUtf8(const std::wstring& wide) {
 }
 
 size_t GdiCanvas::MeasureText(const std::string& utf8, int font_size,
-                              bool bold, int max_width) const {
-    auto key = std::make_pair(font_size, bold);
-    HFONT font = nullptr;
-    auto it = fonts_.find(key);
-    if (it != fonts_.end()) {
-        font = it->second;
-    } else {
-        font = CreateFontW(
-            -MulDiv(font_size, GetDeviceCaps(dc_, LOGPIXELSY), 72),
-            0, 0, 0,
-            bold ? FW_BOLD : FW_NORMAL,
-            FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-        fonts_[key] = font;
-    }
+                              bool bold, int max_width,
+                              bool italic) const {
+    HFONT font = FontFor(font_size, bold, italic);
     HFONT old = (HFONT)SelectObject(dc_, font);
     SIZE sz{};
     std::wstring wide = Utf8ToWide(utf8);
@@ -91,24 +80,35 @@ size_t GdiCanvas::MeasureText(const std::string& utf8, int font_size,
     return (size_t)sz.cx;
 }
 
+int GdiCanvas::TextHeight(int font_size, bool bold, bool italic) const {
+    HFONT font = FontFor(font_size, bold, italic);
+    HFONT old = (HFONT)SelectObject(dc_, font);
+    TEXTMETRICW tm{};
+    GetTextMetricsW(dc_, &tm);
+    SelectObject(dc_, old);
+    return (int)(tm.tmHeight + tm.tmExternalLeading);
+}
+
+HFONT GdiCanvas::FontFor(int font_size, bool bold, bool italic) const {
+    FontKey key{font_size, bold, italic};
+    auto it = fonts_.find(key);
+    if (it != fonts_.end()) return it->second;
+    HFONT font = CreateFontW(
+        -MulDiv(font_size, GetDeviceCaps(dc_, LOGPIXELSY), 72), 0, 0,
+        italic ? 10 : 0, bold ? FW_BOLD : FW_NORMAL, italic ? TRUE : FALSE,
+        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    fonts_[key] = font;
+    return font;
+}
+
 void GdiCanvas::DrawText(const std::string& utf8, int x, int y,
                          int font_size, uint32_t rgb, bool bold,
                          bool italic, bool underline) {
-    auto key = std::make_pair(font_size, bold);
-    HFONT font = nullptr;
-    auto it = fonts_.find(key);
-    if (it != fonts_.end()) {
-        font = it->second;
-    } else {
-        font = CreateFontW(
-            -MulDiv(font_size, GetDeviceCaps(dc_, LOGPIXELSY), 72),
-            0, 0, italic ? 10 : 0,
-            bold ? FW_BOLD : FW_NORMAL,
-            italic ? TRUE : FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-        fonts_[key] = font;
-    }
+    // 字体缓存必须把 italic 算进 key：斜体和正体是不同的字型，
+    // 之前只用 (size, bold) 做 key，先画正体再画斜体会复用正体字体，
+    // 结果 <i>/<em> 全部渲染成正体。
+    HFONT font = FontFor(font_size, bold, italic);
     HFONT old = (HFONT)SelectObject(dc_, font);
     COLORREF old_color = SetTextColor(dc_, RGB((rgb >> 16) & 255,
                                                (rgb >> 8) & 255,
@@ -180,16 +180,34 @@ void GdiCanvas::StrokeLine(int x1, int y1, int x2, int y2, uint32_t rgb,
     DeleteObject(pen);
 }
 
-void GdiCanvas::StrokeArc(const Rect& rc, int start, int sweep,
-                          uint32_t rgb) {
-    (void)start;
-    (void)sweep;
-    HPEN pen = CreatePen(PS_SOLID, 2, RGB((rgb >> 16) & 255,
-                                          (rgb >> 8) & 255,
-                                          rgb & 255));
+void GdiCanvas::StrokeArc(const Rect& rc, int start, int sweep, uint32_t rgb,
+                          int width) {
+    // 原来的实现忽略了 start/sweep 直接 Ellipse()，而调用方按
+    // {left,top,right,bottom} 传参，于是画出的是 94x67 的巨型椭圆，
+    // 溢出到地址栏上。这里按 {x,y,w,h} 外接矩形画真正的圆弧：
+    // 用折线逼近（角度约定：0° 指向右、逆时针为正、y 轴向上）。
+    int rx = rc.w / 2;
+    int ry = rc.h / 2;
+    if (rx <= 0 || ry <= 0 || sweep == 0) return;
+    int cx = rc.x + rx;
+    int cy = rc.y + ry;
+    int steps = std::max(8, std::abs(sweep) / 6);
+    std::vector<POINT> pts;
+    pts.reserve((size_t)steps + 1);
+    const double kPi = 3.14159265358979323846;
+    for (int i = 0; i <= steps; ++i) {
+        double a = (start + (double)sweep * i / steps) * kPi / 180.0;
+        POINT p{};
+        p.x = (LONG)std::lround(cx + rx * std::cos(a));
+        p.y = (LONG)std::lround(cy - ry * std::sin(a));
+        pts.push_back(p);
+    }
+    HPEN pen = CreatePen(PS_SOLID, width, RGB((rgb >> 16) & 255,
+                                              (rgb >> 8) & 255,
+                                              rgb & 255));
     HGDIOBJ old_pen = SelectObject(dc_, pen);
     HBRUSH old_br = (HBRUSH)SelectObject(dc_, GetStockObject(NULL_BRUSH));
-    Ellipse(dc_, rc.x, rc.y, rc.x + rc.w, rc.y + rc.h);
+    Polyline(dc_, pts.data(), (int)pts.size());
     SelectObject(dc_, old_br);
     SelectObject(dc_, old_pen);
     DeleteObject(pen);

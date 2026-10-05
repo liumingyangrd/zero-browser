@@ -269,13 +269,149 @@ inline Style DefaultStyle() {
     return s;
 }
 
+// 视口尺寸，供 vh / vw / calc 折算。由引擎在布局前写入。
+inline int& CssViewportWidth() {
+    static int w = 1280;
+    return w;
+}
+inline int& CssViewportHeight() {
+    static int h = 800;
+    return h;
+}
+
+// 解析一个长度分量。unit: 0=px 1=% 2=rem 3=em 4=vh 5=vw。
+inline bool ParseLengthToken(const std::string& raw, float* out, int* unit) {
+    std::string v = Trim(Lower(raw));
+    if (v.empty()) return false;
+    size_t i = 0;
+    while (i < v.size() &&
+           (std::isdigit((unsigned char)v[i]) || v[i] == '.' || v[i] == '-' ||
+            v[i] == '+' || v[i] == ' ')) {
+        i++;
+    }
+    std::string num = Trim(v.substr(0, i));
+    if (num.empty()) return false;
+    *out = (float)std::atof(num.c_str());
+    std::string u = Trim(v.substr(i));
+    if (u.empty() || u == "px") { *unit = 0; return true; }
+    if (u == "%") { *unit = 1; return true; }
+    if (u == "rem") { *unit = 2; return true; }
+    if (u == "em") { *unit = 3; return true; }
+    if (u == "vh") { *unit = 4; return true; }
+    if (u == "vw") { *unit = 5; return true; }
+    if (u == "pt") { *out *= 96.f / 72.f; *unit = 0; return true; }
+    if (u == "pc") { *out *= 16.f; *unit = 0; return true; }
+    if (u == "in") { *out *= 96.f; *unit = 0; return true; }
+    if (u == "cm") { *out *= 37.795f; *unit = 0; return true; }
+    if (u == "mm") { *out *= 3.7795f; *unit = 0; return true; }
+    // ch / ex 按半个字号近似
+    if (u == "ch" || u == "ex") { *out *= 8.f; *unit = 0; return true; }
+    return false;
+}
+
+// calc() 求值：支持 length 之间的 + -，以及 <数字> * <length>。
+// 求不出来返回 false（调用方按 auto 处理，绝不能退化成 0）。
+inline bool EvalCalcTerm(const std::string& raw, float* px, float* pct) {
+    std::string t = Trim(raw);
+    if (t.empty()) return false;
+    size_t star = t.find('*');
+    if (star != std::string::npos) {
+        std::string l = Trim(t.substr(0, star));
+        std::string r = Trim(t.substr(star + 1));
+        float ln = 0, rn = 0;
+        int lu = 0, ru = 0;
+        bool lok = ParseLengthToken(l, &ln, &lu);
+        bool rok = ParseLengthToken(r, &rn, &ru);
+        if (!lok || !rok) return false;
+        if (lu != 0 && ru != 0) return false;  // 长度×长度没有意义
+        float scale = (lu == 0) ? ln : rn;     // 用无单位的那一侧做倍数
+        float val = (lu == 0) ? rn : ln;
+        int unit = (lu == 0) ? ru : lu;
+        switch (unit) {
+            case 1: *pct += scale * val; break;
+            case 2:
+            case 3: *px += scale * val * 16.f; break;
+            case 4: *px += scale * val * CssViewportHeight() / 100.f; break;
+            case 5: *px += scale * val * CssViewportWidth() / 100.f; break;
+            default: *px += scale * val; break;
+        }
+        return true;
+    }
+    float n = 0;
+    int unit = 0;
+    if (!ParseLengthToken(t, &n, &unit)) return false;
+    switch (unit) {
+        case 1: *pct += n; break;
+        case 2:
+        case 3: *px += n * 16.f; break;
+        case 4: *px += n * CssViewportHeight() / 100.f; break;
+        case 5: *px += n * CssViewportWidth() / 100.f; break;
+        default: *px += n; break;
+    }
+    return true;
+}
+
+inline bool EvalCalc(const std::string& raw, float* px_out, float* pct_out) {
+    std::string v = Trim(Lower(raw));
+    if (!StartsWith(v, "calc(") || v.back() != ')') return false;
+    std::string inner = v.substr(5, v.size() - 6);
+    float px = 0;
+    float pct = 0;
+    int sign = 1;
+    std::string term;
+    for (size_t i = 0; i <= inner.size(); ++i) {
+        bool at_end = (i == inner.size());
+        char c = at_end ? '+' : inner[i];
+        bool is_sign = (!at_end && (c == '+' || c == '-'));
+        if (is_sign) {
+            // 负号可能是数值的一部分（如 calc(-10px + 50%)）
+            size_t j = i;
+            bool prev_is_operand = false;
+            while (j > 0) {
+                char p = inner[j - 1];
+                if (p == ' ' || p == '\t') { j--; continue; }
+                prev_is_operand = !(p == '+' || p == '-' || p == '*' || p == '/');
+                break;
+            }
+            if (!prev_is_operand) {
+                term.push_back(c);
+                continue;
+            }
+        }
+        if (is_sign || at_end) {
+            std::string t = Trim(term);
+            if (t.empty()) {
+                if (at_end) break;
+                sign = (c == '-') ? -1 : 1;
+                continue;
+            }
+            float tpx = 0;
+            float tpct = 0;
+            if (!EvalCalcTerm(t, &tpx, &tpct)) return false;
+            px += sign * tpx;
+            pct += sign * tpct;
+            term.clear();
+            sign = (c == '-') ? -1 : 1;
+            if (at_end) break;
+            continue;
+        }
+        term.push_back(c);
+    }
+    *px_out = px;
+    *pct_out = pct;
+    return true;
+}
+
 inline void SetLength(Length& out, const std::string& value, bool is_num = false) {
     std::string v = Trim(Lower(value));
     out = Length{};
-    if (v.empty() || v == "auto" || v == "none") return;
-    if (v == "0") {
-        out.is_auto = false;
-        out.value = 0.f;
+    // 这些值一律按 auto 处理。绝不能落到 atof() 变成 0：
+    // 真实站点大量使用 max-content / fit-content / calc()，一旦被当成 0，
+    // 整个容器宽度就是 0，页面会“渲染成空白”。
+    if (v.empty() || v == "auto" || v == "none" || v == "max-content" ||
+        v == "min-content" || v == "fit-content" || v == "fill-available" ||
+        v == "stretch" || v == "inherit" || v == "initial" || v == "unset" ||
+        v == "revert" || v == "revert-layer") {
         return;
     }
     if (is_num) {
@@ -283,19 +419,32 @@ inline void SetLength(Length& out, const std::string& value, bool is_num = false
         out.value = (float)std::atof(v.c_str());
         return;
     }
-    if (EndsWith(v, "px")) {
+    if (StartsWith(v, "calc(")) {
+        float px = 0;
+        float pct = 0;
+        if (!EvalCalc(v, &px, &pct)) return;
         out.is_auto = false;
-        out.value = (float)std::atof(v.substr(0, v.size() - 2).c_str());
-    } else if (EndsWith(v, "%")) {
-        out.is_auto = false;
-        out.percent = true;
-        out.value = (float)std::atof(v.substr(0, v.size() - 1).c_str());
-    } else if (EndsWith(v, "em")) {
-        out.is_auto = false;
-        out.value = (float)std::atof(v.substr(0, v.size() - 2).c_str()) * 16.f;
-    } else {
-        out.is_auto = false;
-        out.value = (float)std::atof(v.c_str());
+        if (pct != 0.f && px == 0.f) {
+            out.percent = true;
+            out.value = pct;
+        } else if (pct == 0.f) {
+            out.value = px;
+        } else {
+            out.value = px + pct * CssViewportWidth() / 100.f;
+        }
+        return;
+    }
+    float num = 0;
+    int unit = 0;
+    if (!ParseLengthToken(v, &num, &unit)) return;  // 未知单位 → auto
+    out.is_auto = false;
+    switch (unit) {
+        case 1: out.percent = true; out.value = num; break;
+        case 2:
+        case 3: out.value = num * 16.f; break;
+        case 4: out.value = num * CssViewportHeight() / 100.f; break;
+        case 5: out.value = num * CssViewportWidth() / 100.f; break;
+        default: out.value = num; break;
     }
 }
 

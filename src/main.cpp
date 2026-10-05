@@ -103,6 +103,15 @@ int main(int argc, char** argv) {
         std::printf("content_type=%s\n", res.content_type.c_str());
         std::printf("error=%s\n", res.error.c_str());
         std::printf("bytes=%zu\n", res.html.size());
+        // 可选第三个参数：把正文写到文件，便于离线检查真实站点返回的内容。
+        if (argc > 3 && *argv[3] && !res.html.empty()) {
+            FILE* f = std::fopen(argv[3], "wb");
+            if (f) {
+                std::fwrite(res.html.data(), 1, res.html.size(), f);
+                std::fclose(f);
+                std::printf("saved=%s\n", argv[3]);
+            }
+        }
         return ok ? 0 : 1;
     }
 

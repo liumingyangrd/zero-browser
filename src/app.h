@@ -115,6 +115,11 @@ private:
     std::string CurrentUrl() const;
     TabState& ActiveTab();
     const TabState& ActiveTab() const;
+    // 标签宽度只在标签数量/窗口宽度变化时变，绘制与命中测试必须同源。
+    int TabWidth() const {
+        int n = (int)tabs_.size();
+        return std::max(70, std::min(190, (width_ - 70) / std::max(1, n)));
+    }
 
     HINSTANCE inst_ = nullptr;
     HWND hwnd_ = nullptr;

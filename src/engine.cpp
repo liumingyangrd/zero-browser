@@ -260,6 +260,86 @@ std::vector<SelectorPart> ParseSelectorChain(const std::string& raw) {
     return chain;
 }
 
+// 找到与 open 处的 '{' 匹配的 '}'，跳过字符串与注释里的花括号。
+size_t FindMatchingBrace(const std::string& css, size_t open) {
+    int depth = 0;
+    char quote = 0;
+    for (size_t i = open; i < css.size(); ++i) {
+        char c = css[i];
+        if (quote) {
+            if (c == '\\') { i++; continue; }
+            if (c == quote) quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'') { quote = c; continue; }
+        if (c == '{') depth++;
+        else if (c == '}') {
+            depth--;
+            if (depth == 0) return i;
+        }
+    }
+    return std::string::npos;
+}
+
+// 按分隔符拆分，但跳过 () [] 内部以及引号内部的分隔符。
+// 必须这样做：`background: url(data:image/png;base64,AAA)` 里的分号、
+// `content: ";"` 里的分号都不是声明分隔符，简单 SplitStr 会把声明切坏。
+std::vector<std::string> SplitTopLevel(const std::string& s, char sep) {
+    std::vector<std::string> out;
+    int depth = 0;
+    char quote = 0;
+    std::string cur;
+    for (size_t i = 0; i < s.size(); ++i) {
+        char c = s[i];
+        if (quote) {
+            cur.push_back(c);
+            if (c == '\\' && i + 1 < s.size()) {
+                cur.push_back(s[++i]);
+                continue;
+            }
+            if (c == quote) quote = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'') { quote = c; cur.push_back(c); continue; }
+        if (c == '(' || c == '[') depth++;
+        else if (c == ')' || c == ']') { if (depth > 0) depth--; }
+        if (c == sep && depth == 0) {
+            out.push_back(cur);
+            cur.clear();
+            continue;
+        }
+        cur.push_back(c);
+    }
+    out.push_back(cur);
+    return out;
+}
+
+// 媒体查询是否适用于当前桌面视口。@media 块不再破坏整个样式表：
+// 没有宽度条件的（如 print、screen）一律采用；带宽度条件时按桌面宽度判断。
+bool MediaQueryMatchesDesktop(const std::string& query) {
+    const int kDesktopWidth = 1280;
+    std::string q = Lower(query);
+    size_t pos = 0;
+    while (true) {
+        size_t p = q.find("width", pos);
+        if (p == std::string::npos) break;
+        size_t colon = q.find(':', p);
+        if (colon == std::string::npos) break;
+        std::string num;
+        for (size_t i = colon + 1; i < q.size(); ++i) {
+            if (std::isdigit((unsigned char)q[i])) num.push_back(q[i]);
+            else if (!num.empty()) break;
+        }
+        int value = std::atoi(num.c_str());
+        bool is_max = p >= 5 && q.compare(p - 5, 5, "max-w") == 0;
+        bool is_min = p >= 5 && q.compare(p - 5, 5, "min-w") == 0;
+        if (is_max && value > 0 && value < kDesktopWidth) return false;
+        if (is_min && value > kDesktopWidth) return false;
+        pos = colon + 1;
+    }
+    return true;
+}
+
 std::vector<CssRule> ParseCssText(const std::string& css_raw, int* index) {
     std::vector<CssRule> rules;
     std::string css = RemoveComments(css_raw);
@@ -267,35 +347,62 @@ std::vector<CssRule> ParseCssText(const std::string& css_raw, int* index) {
     // 按逗号拆分选择器组，但跳过 :not(...) / [attr="a,b"] 内部的逗号。
     auto split_selectors = [](const std::string& s) {
         std::vector<std::string> out;
-        std::string cur;
-        int depth = 0;
-        for (char c : s) {
-            if (c == '(' || c == '[') depth++;
-            else if (c == ')' || c == ']') { if (depth > 0) depth--; }
-            if (c == ',' && depth == 0) {
-                if (!Trim(cur).empty()) out.push_back(Trim(cur));
-                cur.clear();
-                continue;
-            }
-            cur.push_back(c);
+        for (const auto& piece : SplitTopLevel(s, ',')) {
+            if (!Trim(piece).empty()) out.push_back(Trim(piece));
         }
-        if (!Trim(cur).empty()) out.push_back(Trim(cur));
         return out;
     };
     while (pos < css.size()) {
         size_t open = css.find('{', pos);
         if (open == std::string::npos) break;
-        std::string selector_text = css.substr(pos, open - pos);
-        size_t close = css.find('}', open);
+        std::string selector_text = Trim(css.substr(pos, open - pos));
+        size_t close = FindMatchingBrace(css, open);
         if (close == std::string::npos) break;
         std::string body = css.substr(open + 1, close - open - 1);
+
+        if (!selector_text.empty() && selector_text[0] == '@') {
+            // @media / @supports 里是嵌套规则，递归解析；其余 at 规则跳过整个块。
+            std::string at = Lower(selector_text);
+            bool nested = StartsWith(at, "@media") || StartsWith(at, "@supports") ||
+                          StartsWith(at, "@layer");
+            if (nested && StartsWith(at, "@media")) {
+                size_t brace = selector_text.find('{');
+                std::string query = brace == std::string::npos
+                                        ? selector_text.substr(6)
+                                        : selector_text.substr(6, brace - 6);
+                if (MediaQueryMatchesDesktop(query)) {
+                    auto inner = ParseCssText(body, index);
+                    for (auto& r : inner) rules.push_back(std::move(r));
+                }
+            } else if (nested) {
+                auto inner = ParseCssText(body, index);
+                for (auto& r : inner) rules.push_back(std::move(r));
+            }
+            pos = close + 1;
+            continue;
+        }
         pos = close + 1;
 
         std::vector<std::pair<std::string, std::string>> decls;
-        for (const auto& decl : SplitStr(body, ';')) {
+        for (const auto& decl : SplitTopLevel(body, ';')) {
             std::string d = Trim(decl);
             if (d.empty()) continue;
-            size_t colon = d.find(':');
+            // 跳过自定义属性（var() 解析另行处理）以外的普通声明；
+            // 冒号要取第一个“不在括号内”的。
+            int depth = 0;
+            char quote = 0;
+            size_t colon = std::string::npos;
+            for (size_t i = 0; i < d.size(); ++i) {
+                char c = d[i];
+                if (quote) {
+                    if (c == quote) quote = 0;
+                    continue;
+                }
+                if (c == '"' || c == '\'') { quote = c; continue; }
+                if (c == '(') depth++;
+                else if (c == ')') { if (depth > 0) depth--; }
+                else if (c == ':' && depth == 0) { colon = i; break; }
+            }
             if (colon == std::string::npos) continue;
             decls.emplace_back(Trim(d.substr(0, colon)),
                                Trim(d.substr(colon + 1)));
@@ -2016,6 +2123,9 @@ void CollectLinks(const Box& box, std::vector<LinkArea>& out,
 }  // namespace
 
 std::unique_ptr<Box> Layout::Build(Canvas* measurer) {
+    // vh / vw / calc() 折算需要知道视口尺寸，compute style 之前先写入。
+    CssViewportWidth() = viewport_w_;
+    CssViewportHeight() = viewport_h_ > 0 ? viewport_h_ : 800;
     auto root = std::make_unique<Box>();
     root->node = const_cast<Node*>(root_);
     root->rules = &rules_;

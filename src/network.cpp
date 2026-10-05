@@ -15,8 +15,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
+#include <atomic>
 #include <ctime>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #ifndef WINHTTP_OPTION_DECOMPRESSION
@@ -335,26 +337,57 @@ void AbsorbSetCookies(const std::string& url,
 
 }  // namespace
 
-bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
-               DWORD access_type, const wchar_t* named_proxy,
-               bool binary = false, bool use_cookies = false) {
-    if (!result) return false;
-    *result = FetchResult{};
-    std::wstring wurl = U8ToW(url);
-
+// 每个线程复用一个 WinHTTP 会话。会话复用才能启用连接保活（keep-alive）与
+// TLS 会话缓存：否则每个图片/样式都要重新握手，真实站点几十个资源要几十秒。
+HINTERNET AcquireSession(DWORD access_type, const wchar_t* named_proxy,
+                         int timeout_ms) {
+    struct Cache {
+        HINTERNET handle = nullptr;
+        std::wstring proxy;
+        DWORD access = 0;
+    };
+    static thread_local Cache cache;
+    std::wstring want = named_proxy ? named_proxy : L"";
+    if (cache.handle && cache.proxy == want && cache.access == access_type) {
+        WinHttpSetTimeouts(cache.handle, timeout_ms, timeout_ms, timeout_ms,
+                           timeout_ms * 2);
+        return cache.handle;
+    }
+    if (cache.handle) {
+        WinHttpCloseHandle(cache.handle);
+        cache.handle = nullptr;
+    }
     HINTERNET session = WinHttpOpen(
         L"ZeroBrowser/0.2 (self-built engine; system TLS transport)",
         access_type, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!session) {
-        result->error = Win32Error("WinHttpOpen 失败");
-        return false;
-    }
+    if (!session) return nullptr;
     if (named_proxy && *named_proxy) {
         WINHTTP_PROXY_INFO proxy{};
         proxy.dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
         proxy.lpszProxy = const_cast<wchar_t*>(named_proxy);
         proxy.lpszProxyBypass = nullptr;
         WinHttpSetOption(session, WINHTTP_OPTION_PROXY, &proxy, sizeof(proxy));
+    }
+    WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms,
+                       timeout_ms * 2);
+    cache.handle = session;
+    cache.proxy = want;
+    cache.access = access_type;
+    return session;
+}
+
+bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
+               DWORD access_type, const wchar_t* named_proxy,
+               bool binary = false, bool use_cookies = false,
+               const std::string& referer = std::string()) {
+    if (!result) return false;
+    *result = FetchResult{};
+    std::wstring wurl = U8ToW(url);
+
+    HINTERNET session = AcquireSession(access_type, named_proxy, timeout_ms);
+    if (!session) {
+        result->error = Win32Error("WinHttpOpen 失败");
+        return false;
     }
     WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms,
                        timeout_ms * 2);
@@ -376,7 +409,6 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 
     if (!WinHttpCrackUrl(wurl.c_str(), (DWORD)wurl.size(), 0, &uc)) {
         result->error = "无法解析 URL";
-        WinHttpCloseHandle(session);
         return false;
     }
 
@@ -387,7 +419,6 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     HINTERNET connect = WinHttpConnect(session, host, (INTERNET_PORT)uc.nPort, 0);
     if (!connect) {
         result->error = Win32Error("WinHttpConnect 失败");
-        WinHttpCloseHandle(session);
         return false;
     }
 
@@ -397,7 +428,6 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     if (!request) {
         result->error = Win32Error("WinHttpOpenRequest 失败");
         WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
         return false;
     }
 
@@ -423,6 +453,14 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     WinHttpAddRequestHeaders(request, headers, (DWORD)-1L,
                              WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
 
+    // 很多 CDN / 图床在缺少 Referer 时直接 403，子资源请求要带上来源页。
+    if (!referer.empty()) {
+        std::wstring wref = U8ToW("Referer: " + referer + "\r\n");
+        WinHttpAddRequestHeaders(request, wref.c_str(), (DWORD)-1L,
+                                 WINHTTP_ADDREQ_FLAG_ADD |
+                                     WINHTTP_ADDREQ_FLAG_REPLACE);
+    }
+
     if (use_cookies) {
         std::string cookie_header = CookieHeaderFor(url, secure);
         if (!cookie_header.empty()) {
@@ -439,7 +477,6 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
         result->error = Win32Error("请求发送失败");
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
         return false;
     }
 
@@ -447,7 +484,6 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
         result->error = Win32Error("接收响应失败");
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
-        WinHttpCloseHandle(session);
         return false;
     }
 
@@ -514,7 +550,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 
     WinHttpCloseHandle(request);
     WinHttpCloseHandle(connect);
-    WinHttpCloseHandle(session);
+    // 注意：session 由线程级缓存持有，这里不能关闭，否则下一次请求会用到野句柄。
 
     if (use_cookies) {
         AbsorbSetCookies(result->final_url.empty() ? url : result->final_url,
@@ -532,7 +568,8 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 }
 
 bool FetchWithStrategies(const std::string& url, FetchResult* result,
-                         int timeout_ms, bool binary, bool use_cookies) {
+                         int timeout_ms, bool binary, bool use_cookies,
+                         const std::string& referer = std::string()) {
     if (!result) return false;
 
     std::string env = EnvUtf8("ZB_PROXY");
@@ -556,7 +593,7 @@ bool FetchWithStrategies(const std::string& url, FetchResult* result,
     for (const auto& attempt : attempts) {
         FetchResult one;
         bool ok = FetchOnce(url, &one, timeout_ms, attempt.type, attempt.proxy,
-                            binary, use_cookies);
+                            binary, use_cookies, referer);
         if (ok && (one.status > 0 || !one.html.empty())) {
             *result = one;
             return true;
@@ -584,13 +621,40 @@ bool FetchBinary(const std::string& url, FetchResult* result, int timeout_ms) {
 }
 
 bool FetchUrlWithCookies(const std::string& url, FetchResult* result,
-                         int timeout_ms) {
-    return FetchWithStrategies(url, result, timeout_ms, false, true);
+                         int timeout_ms, const std::string& referer) {
+    return FetchWithStrategies(url, result, timeout_ms, false, true, referer);
 }
 
 bool FetchBinaryWithCookies(const std::string& url, FetchResult* result,
-                            int timeout_ms) {
-    return FetchWithStrategies(url, result, timeout_ms, true, true);
+                            int timeout_ms, const std::string& referer) {
+    return FetchWithStrategies(url, result, timeout_ms, true, true, referer);
+}
+
+void FetchManyParallel(const std::vector<std::string>& urls, int threads,
+                       std::vector<FetchResult>* out, int timeout_ms,
+                       bool binary, const std::string& referer) {
+    if (!out) return;
+    out->assign(urls.size(), FetchResult{});
+    if (urls.empty()) return;
+    if (threads < 1) threads = 1;
+    if (threads > (int)urls.size()) threads = (int)urls.size();
+
+    std::atomic<size_t> next{0};
+    auto worker = [&]() {
+        for (;;) {
+            size_t i = next.fetch_add(1);
+            if (i >= urls.size()) break;
+            FetchResult res;
+            // 子资源统一带 Referer（指向来源页），否则很多 CDN 直接 403。
+            FetchWithStrategies(urls[i], &res, timeout_ms, binary, true, referer);
+            (*out)[i] = std::move(res);
+        }
+    };
+    std::vector<std::thread> pool;
+    pool.reserve((size_t)threads);
+    for (int t = 0; t < threads - 1; ++t) pool.emplace_back(worker);
+    worker();  // 当前线程也干活，避免多等一个 RTT
+    for (auto& th : pool) th.join();
 }
 
 std::vector<std::string> CookieJarDump() {
@@ -603,6 +667,12 @@ std::vector<std::string> CookieJarDump() {
         out.push_back(line);
     }
     return out;
+}
+
+void CookieJarAbsorbText(const std::string& url,
+                         const std::string& set_cookie) {
+    if (set_cookie.empty()) return;
+    AbsorbSetCookie(url, set_cookie);
 }
 
 }  // namespace zb

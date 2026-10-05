@@ -28,12 +28,27 @@ bool FetchBinary(const std::string& url, FetchResult* result,
 // Cookie-aware versions: they attach matching cookies and absorb Set-Cookie
 // headers through the process-global jar. Real browser pages should use these
 // so login/state cookies survive across HTML/CSS/image requests.
+// referer 非空时会带上 Referer 头：很多 CDN / 图床没有 Referer 会直接 403。
 bool FetchUrlWithCookies(const std::string& url, FetchResult* result,
-                         int timeout_ms = 15000);
+                         int timeout_ms = 15000,
+                         const std::string& referer = std::string());
 bool FetchBinaryWithCookies(const std::string& url, FetchResult* result,
-                            int timeout_ms = 30000);
+                            int timeout_ms = 30000,
+                            const std::string& referer = std::string());
+
+// 并行抓取一批 URL（内部用固定数量的工作线程 + 复用 WinHTTP 会话）。
+// 真实站点一次要取几十个图片/样式，串行会把首屏拖到几十秒。
+// referer 会作为这些子资源请求的 Referer 发送。
+void FetchManyParallel(const std::vector<std::string>& urls, int threads,
+                       std::vector<FetchResult>* out, int timeout_ms = 15000,
+                       bool binary = true,
+                       const std::string& referer = std::string());
 
 // Diagnostic helpers for the network layer.
 std::vector<std::string> CookieJarDump();
+
+// 把一条 Set-Cookie 形式的文本（"name=value; path=/; max-age=300"）写入 jar。
+// 用于处理「JS 先设置 Cookie 再重载」的反爬挑战页（见 app.cpp 的挑战处理）。
+void CookieJarAbsorbText(const std::string& url, const std::string& set_cookie);
 
 }  // namespace zb

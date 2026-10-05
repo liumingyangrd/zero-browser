@@ -1,0 +1,13 @@
+# 统一换行：源码在仓库与检出时都用 LF
+* text=auto eol=lf
+
+# 批处理必须保持 CRLF，否则 cmd 解析 label/goto 会出问题
+*.bat text eol=crlf
+
+# 二进制资源不要做换行转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.wmv binary
+*.bmp binary

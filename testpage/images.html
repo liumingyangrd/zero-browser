@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>图片渲染测试</title><style>
+body { margin:0; background:#f8fafc; color:#0f172a; font-family:Segoe UI; font-size:15px; }
+.wrap { max-width:960px; margin:24px auto; padding:20px; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; }
+h1 { font-size:24px; margin:0 0 8px 0; }
+h2 { font-size:17px; margin:24px 0 6px 0; }
+img { display:inline-block; margin:4px; }
+.row { display:flex; gap:16px; align-items:center; }
+.boxed { border:2px solid #dc2626; padding:8px; background:#fff7ed; display:block; }
+.full { width:100%; }
+.hero { height:220px; background-image:url("photo.jpg"); background-size:cover; border-radius:8px; display:block; }
+.card-bg { height:140px; background-image:url("logo-alpha.png"); background-size:contain; border:1px solid #cbd5e1; display:block; }
+</style></head><body>
+<div class="wrap">
+  <h1>图片渲染测试</h1>
+  <p>下面依次是 PNG、JPEG、GIF、透明 PNG，以及指定的宽高组合。</p>
+  <h2>背景图</h2>
+  <div class="hero"></div>
+  <div class="card-bg"></div>
+  <h2>flex 行内的图片</h2>
+  <div class="row">
+    <img src="logo.png" width="120">
+    <img src="photo.jpg" width="160" height="100">
+    <img src="anim.gif" width="100" height="75">
+  </div>
+  <h2>原图与指定宽高</h2>
+  <div>
+    <img src="logo.png" width="160">
+    <img src="photo.jpg" width="180" height="120">
+    <img src="anim.gif">
+  </div>
+  <h2>透明 PNG 与 CSS 尺寸</h2>
+  <div>
+    <img src="logo-alpha.png" class="boxed" style="width:140px;height:90px">
+    <img src="logo-alpha.png">
+  </div>
+  <h2>CSS 百分比与边框</h2>
+  <div class="boxed">
+    <img src="photo.jpg" class="full" style="border-radius:6px">
+  </div>
+  <p>文字在图片之后，<img src="logo.png" class="inline" width="48" style="background:#fef3c7">这里验证行内图片参与文本行高。</p>
+  <img src="missing.png" width="150" height="80" alt="缺失的配图">
+</div>
+</body></html>

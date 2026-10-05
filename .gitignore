@@ -1,0 +1,24 @@
+# 构建产物
+build/
+*.exe
+*.o
+*.obj
+*.dll
+*.lib
+*.ilk
+*.pdb
+*.exp
+
+# 取证用的位图（截图已转成 docs/screenshots/*.png 入库）
+*.bmp
+
+# 内部交接文档，不随仓库发布
+CONTINUE_PROMPT.md
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini

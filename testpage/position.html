@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Position 定位测试</title><style>
+body { margin:0; background:#f8fafc; color:#0f172a; font-family:Segoe UI; font-size:15px; height:1200px; }
+.wrap { max-width:960px; margin:24px auto; padding:20px; background:#ffffff; border:1px solid #e2e8f0; }
+h1 { font-size:22px; margin:0 0 10px 0; }
+h2 { font-size:16px; margin:20px 0 6px 0; }
+.static-box { border:1px solid #cbd5e1; padding:10px; margin-bottom:6px; }
+.rel { position:relative; top:18px; left:24px; background:#dbeafe; border:1px solid #93c5fd; padding:10px; }
+.abs { position:absolute; top:120px; left:60px; width:280px; background:#fef3c7; border:1px solid #fcd34d; padding:10px; z-index:5; }
+.abslow { position:absolute; top:140px; left:80px; width:280px; background:#fee2e2; border:1px solid #fca5a5; padding:10px; z-index:1; }
+.fixed-nav { position:fixed; top:0; left:0; right:0; height:36px; background:#0f172a; color:#f8fafc; line-height:36px; padding-left:16px; z-index:50; }
+.sticky-note { position:fixed; bottom:16px; right:16px; width:180px; background:#dcfce7; border:1px solid #86efac; padding:8px; z-index:20; }
+</style></head><body>
+<div class="fixed-nav">固定顶部导航栏（fixed，不随滚动）</div>
+<div class="wrap">
+  <h1>CSS position 定位测试</h1>
+  <div class="static-box">普通流盒子 1</div>
+  <div class="rel">相对定位：在自己的原位向下 18px、向右 24px</div>
+  <div class="static-box">普通流盒子 2（应略被 relative 挤开）</div>
+  <div style="height:140px;position:relative;border:1px dashed #94a3b8;margin-top:10px;">
+    定位容器（relative）
+  </div>
+  <p>absolute 元素相对最近的 positioned 祖先定位。下面两个彩色块叠在虚线容器上：</p>
+  <div class="abs">绝对定位 z-index:5（后绘，在最上层）</div>
+  <div class="abslow">绝对定位 z-index:1（先绘，在下层）</div>
+  <p style="margin-top:340px;">更多内容用于测试滚动时 fixed 是否保持悬浮……</p>
+  <div style="height:600px;"></div>
+  <p>页面底部。</p>
+</div>
+<div class="sticky-note">右下角悬浮提示（fixed）</div>
+</body></html>

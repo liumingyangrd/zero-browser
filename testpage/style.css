@@ -1,0 +1,6 @@
+body { margin:0; background:#eef2ff; color:#1e293b; font-size:17px; line-height:1.6; }
+.page { max-width:700px; margin:32px auto; background:#ffffff; border:1px solid #c7d2fe; padding:28px; }
+h1 { color:#4338ca; font-size:30px; margin-top:0; }
+.note { background:#e0e7ff; border:1px solid #a5b4fc; padding:12px 16px; margin-top:16px; }
+.hl { color:#dc2626; font-weight:bold; }
+ul { padding-left:26px; }

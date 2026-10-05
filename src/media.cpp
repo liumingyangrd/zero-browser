@@ -21,8 +21,7 @@
 #define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
 #endif
 
-// MinGW's mfidl.h does not declare this exported function (the SDK does); the
-// symbol lives in mfplat, so we carry our own declaration.
+// MinGW 的 mfidl.h 没有声明这个导出函数（SDK 里有），符号在 mfplat 中，自带一份声明。
 extern "C" HRESULT WINAPI MFCreateMFByteStreamOnStream(
     IStream* pStream, IMFByteStream** ppByteStream);
 
@@ -98,9 +97,8 @@ void SafeRelease(T** p) {
     }
 }
 
-// Write our own media cache file: MFCreateTempFile is refused in restricted
-// environments, so use a plain CreateFile into %TEMP%\zero-browser-media
-// (falling back to the process directory on failure).
+// 自己写一个媒体缓存文件：受限环境下 MFCreateTempFile 会被拒绝，
+// 用普通 CreateFile 写到 %TEMP%\zero-browser-media（失败再退回进程目录）。
 bool WriteOwnTempFile(const std::string& bytes, std::string* path_out,
                       std::string* error) {
     static std::atomic<unsigned> counter{0};
@@ -135,7 +133,7 @@ bool WriteOwnTempFile(const std::string& bytes, std::string* path_out,
     }
     if (h == INVALID_HANDLE_VALUE) {
         char buf[128];
-        std::snprintf(buf, sizeof(buf), "cannot create media cache file (Win32 %lu)",
+        std::snprintf(buf, sizeof(buf), "无法创建媒体缓存文件 (Win32 %lu)",
                       (unsigned long)GetLastError());
         *error = buf;
         return false;
@@ -145,7 +143,7 @@ bool WriteOwnTempFile(const std::string& bytes, std::string* path_out,
     CloseHandle(h);
     if (!ok || written != bytes.size()) {
         DeleteFileW(full.c_str());
-        *error = "failed to write media cache file";
+        *error = "写入媒体缓存文件失败";
         return false;
     }
     if (path_out) *path_out = WideToUtf8Local(full);
@@ -159,15 +157,13 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
         FetchResult res;
         FetchBinaryWithCookies(url, &res, 60000);
         if (res.html.empty()) {
-            *error = res.error.empty() ? "media download failed" : res.error;
+            *error = res.error.empty() ? "视频下载失败" : res.error;
             return false;
         }
-        // Prefer MFCreateTempFile: it is the least trouble on a normal system
-        // and leaves no leftover files behind.
-        // But in restricted environments it returns E_ACCESSDENIED
-        // (0x80070005), and MinGW's mfplat lacks an import symbol for
-        // MFCreateMFByteStreamOnStream, so on failure we fall back to building
-        // our own cache file plus MFCreateFile.
+        // 首选 MFCreateTempFile：正常系统上最省事，也不留残留文件。
+        // 但它在受限环境里会返回 E_ACCESSDENIED（0x80070005），
+        // MinGW 的 mfplat 又没有 MFCreateMFByteStreamOnStream 的导入符号，
+        // 所以失败时改成“自己建缓存文件 + MFCreateFile”。
         IMFByteStream* stream = nullptr;
         HRESULT hr = MFCreateTempFile(MF_ACCESSMODE_READWRITE,
                                       MF_OPENMODE_DELETE_IF_EXIST,
@@ -182,7 +178,7 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
                 DeleteFileW(wpath.c_str());
                 char buf[128];
                 std::snprintf(buf, sizeof(buf),
-                              "cannot open media cache file (0x%08lX)",
+                              "无法打开媒体缓存文件 (0x%08lX)",
                               (unsigned long)hr);
                 *error = buf;
                 return false;
@@ -195,7 +191,7 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
                            (ULONG)res.html.size(), &written);
         if (FAILED(hr) || written != res.html.size()) {
             stream->Release();
-            *error = "failed to write media temp file";
+            *error = "写入媒体临时文件失败";
             return false;
         }
         stream->SetCurrentPosition(0);
@@ -208,7 +204,7 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
     HRESULT hr = MFCreateFile(MF_ACCESSMODE_READ, MF_OPENMODE_FAIL_IF_NOT_EXIST,
                               MF_FILEFLAGS_NONE, wpath.c_str(), out);
     if (FAILED(hr) || !*out) {
-        *error = "cannot open media file";
+        *error = "无法打开媒体文件";
         return false;
     }
     return true;
@@ -218,8 +214,7 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
 
 struct MediaPlayer::Impl {
     std::string url;
-    // Path of the media cache file we created ourselves in a restricted
-    // environment; deleted when the player is closed.
+    // 受限环境下自己创建的媒体缓存文件路径，播放器关闭时删除。
     std::string media_temp_path;
     std::atomic<bool> stop{false};
     std::atomic<bool> playing{false};
@@ -229,11 +224,9 @@ struct MediaPlayer::Impl {
     std::atomic<bool> loop{false};
     std::atomic<bool> frame_dirty{false};
     std::atomic<bool> has_audio{false};
-    // Playback clock. std::atomic<double> is deliberately avoided here: on
-    // 32-bit MinGW with -O2 we measured cross-thread writes becoming invisible
-    // (symptoms: timeline jumps had no effect, position did not update after
-    // Seek). A plain double guarded by a mutex behaves fully deterministically
-    // and the cost is negligible.
+    // 播放时钟。这里刻意不用 std::atomic<double>：在 32 位 MinGW + -O2 下实测
+    // 出现过跨线程写入不可见（表现为进度条跳转不生效、Seek 后位置不更新）。
+    // 改用互斥量保护普通 double，行为完全确定，代价可以忽略。
     mutable std::mutex clock_mtx;
     double position = 0.0;
     double base_pos = 0.0;
@@ -276,7 +269,7 @@ struct MediaPlayer::Impl {
         std::lock_guard<std::mutex> lock(clock_mtx);
         seek_request = value;
     }
-    // Pull the playback position straight to value (used for seeking or reset).
+    // 把播放位置直接拉到 value（跳转或重置用）。
     void ResetClock(double value) {
         std::lock_guard<std::mutex> lock(clock_mtx);
         position = value;
@@ -333,7 +326,7 @@ void MediaPlayer::Impl::Run() {
     }
     if (!temp_media_path.empty()) {
         std::lock_guard<std::mutex> lock(mtx);
-        media_temp_path = temp_media_path;  // deleted on Close()
+        media_temp_path = temp_media_path;  // Close() 时删除
     }
     MDBG("media: byte stream ok\n");
 
@@ -346,7 +339,7 @@ void MediaPlayer::Impl::Run() {
     MDBG("media: source reader hr=0x%08lX reader=%p\n", (unsigned long)hr,
          (void*)reader);
     if (FAILED(hr) || !reader) {
-        Fail("cannot create media decoder");
+        Fail("无法创建媒体解码器");
         SafeRelease(&attrs);
         SafeRelease(&stream);
         CoUninitialize();
@@ -374,7 +367,7 @@ void MediaPlayer::Impl::Run() {
     MDBG("media: video_index=%ld audio_index=%ld\n", (long)video_index,
          (long)audio_index);
     if (video_index == (DWORD)-1) {
-        Fail("media has no video stream");
+        Fail("媒体中没有视频流");
         SafeRelease(&reader);
         SafeRelease(&attrs);
         SafeRelease(&stream);
@@ -390,7 +383,7 @@ void MediaPlayer::Impl::Run() {
                                      nullptr, vt);
     SafeRelease(&vt);
     if (FAILED(hr)) {
-        Fail("cannot set video output format");
+        Fail("无法设置视频输出格式");
         SafeRelease(&reader);
         SafeRelease(&attrs);
         SafeRelease(&stream);
@@ -442,15 +435,12 @@ void MediaPlayer::Impl::Run() {
          height.load(), duration.load(), has_audio.load() ? 1 : 0);
     if (playing.load()) StartClock();
 
-    // Even without autoplay we still decode one frame up front as a "poster
-    // frame", otherwise a <video> element is just a solid black block.
-    // Set to true once the first frame has been decoded; while paused the loop
-    // then goes back to sleeping.
+    // 没有 autoplay 时也要先解出一帧当“海报帧”，否则 <video> 只会是一块纯黑。
+    // 取到首帧后置 true，暂停期间就回到休眠等待。
     bool first_frame_done = false;
 
     while (!stop.load()) {
-        // TakeSeek atomically takes and clears the pending seek request
-        // (mutex-guarded, so cross-thread visibility is deterministic).
+        // TakeSeek 会原子地取走并清空跳转请求（互斥量保护，跨线程可见性确定）。
         double seek = TakeSeek();
         if (seek >= 0.0) {
             PROPVARIANT var;
@@ -462,8 +452,7 @@ void MediaPlayer::Impl::Run() {
             ResetClock(seek);
             MDBG("media: worker seek -> seek=%.3f position=%.3f playing=%d\n",
                  seek, GetPosition(), playing.load() ? 1 : 0);
-            // After a seek, decode a fresh frame so the picture follows the
-            // jump even while paused.
+            // 跳转后要重新取一帧，保证暂停状态下画面也跟着跳。
             first_frame_done = false;
         }
 
@@ -472,8 +461,7 @@ void MediaPlayer::Impl::Run() {
                 Sleep(10);
                 continue;
             }
-            // Otherwise keep reading one more sample, solely to obtain the
-            // first frame.
+            // 否则继续往下读一个 sample，只为拿到首帧。
         }
 
         DWORD stream_index = 0;
@@ -483,7 +471,7 @@ void MediaPlayer::Impl::Run() {
         hr = reader->ReadSample(MF_SOURCE_READER_ANY_STREAM, 0, &stream_index,
                                 &flags, &ts, &sample);
         if (FAILED(hr)) {
-            Fail("video decoding failed");
+            Fail("视频解码失败");
             break;
         }
         if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
@@ -494,9 +482,7 @@ void MediaPlayer::Impl::Run() {
             }
             SetPosition(GetDuration());
             playing = false;
-            // Allow the first frame to be decoded again after playback stops at
-            // the end, so the picture does not freeze in the intermediate state
-            // of the last decode.
+            // 播完停住后允许重新取首帧，画面不会停在最后一次解码的中间态。
             first_frame_done = false;
             continue;
         }
@@ -519,20 +505,16 @@ void MediaPlayer::Impl::Run() {
                     {
                         std::lock_guard<std::mutex> lock(mtx);
                         frame.assign(data, data + cur_len);
-                        // The RGB32 that Media Foundation outputs is really
-                        // BGRX: the X byte is not guaranteed to be 255
-                        // (measured: 0 across a whole frame). This engine
-                        // composites with premultiplied AlphaBlend, so alpha=0
-                        // makes the entire frame fully transparent, showing up
-                        // as a solid black <video>. Video frames are always
-                        // opaque, so fill in alpha uniformly here.
+                        // Media Foundation 输出的 RGB32 实际是 BGRX：X 字节并不保证
+                        // 是 255（实测整帧都是 0）。本引擎用预乘 AlphaBlend 合成，
+                        // alpha=0 会让整帧完全透明，表现为一块纯黑的 <video>。
+                        // 视频帧恒为不透明，这里统一补齐 alpha。
                         for (size_t i = 3; i < frame.size(); i += 4) {
                             frame[i] = 255;
                         }
                     }
                     frame_dirty = true;
-                    // The first frame decoded while paused must not advance the
-                    // playback position.
+                    // 暂停时取首帧不应该推进播放位置。
                     if (playing.load()) SetPosition(target);
                     first_frame_done = true;
                     buffer->Unlock();
@@ -540,8 +522,7 @@ void MediaPlayer::Impl::Run() {
                 SafeRelease(&buffer);
             }
         } else if (stream_index == audio_index) {
-            // Push audio only while actually playing and unmuted; do not make
-            // sound while decoding the first frame in the paused state.
+            // 只有真正在播放且未静音时才推音频；暂停取首帧时不要出声。
             if (audio.ok() && playing.load() && !muted.load()) {
                 IMFMediaBuffer* buffer = nullptr;
                 if (SUCCEEDED(sample->GetBufferByIndex(0, &buffer)) && buffer) {
@@ -592,9 +573,8 @@ void MediaPlayer::Open(const std::string& url, bool autoplay, bool loop,
         impl_->frame.clear();
         impl_->error.clear();
     }
-    // Capture Impl* rather than this: once a MediaPlayer object is moved or
-    // destroyed, capturing this and then dereferencing impl_ is undefined
-    // behaviour; holding on to the lifetime of Impl directly is more robust.
+    // 捕获 Impl* 而不是 this：MediaPlayer 对象一旦被移动/析构，捕获 this 再解引用
+    // impl_ 就是未定义行为；直接抓住 Impl 的生命周期更稳。
     Impl* impl = impl_.get();
     impl->worker = std::thread([impl] { impl->Run(); });
 }
@@ -612,8 +592,7 @@ void MediaPlayer::Close() {
         temp_path = impl_->media_temp_path;
         impl_->media_temp_path.clear();
     }
-    // Delete the media cache file we created ourselves here, so nothing is left
-    // behind.
+    // 自己创建的媒体缓存文件在这里删除，避免留下残留。
     if (!temp_path.empty()) {
         std::wstring wpath = U8ToWideLocal(temp_path);
         DeleteFileW(wpath.c_str());

@@ -35,9 +35,8 @@ struct BmpInfoHeader {
 bool SaveBmp(const char* path, const std::vector<uint8_t>& bgra, int w, int h) {
     std::ofstream f(path, std::ios::binary);
     if (!f) return false;
-    // The alpha channel of 32-bit GDI / MF buffers is usually 0, so saving the buffer
-    // as-is makes image viewers treat it as fully transparent. Fill it in as 255 here so
-    // the decoded result can be checked by eye after converting to PNG.
+    // GDI / MF 的 32 位缓冲 alpha 通常为 0，直接存盘会被图片查看器当成全透明。
+    // 这里统一补成 255，方便转 PNG 后肉眼核对解码结果。
     std::vector<uint8_t> copy = bgra;
     for (size_t i = 3; i < copy.size(); i += 4) copy[i] = 255;
     BmpFileHeader fh;

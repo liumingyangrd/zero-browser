@@ -1,14 +1,11 @@
-"""Structurally compare zero-browser's rendering result with a reference browser screenshot.
+"""把 zero-browser 的渲染结果与 Edge 的截图做结构对比。
 
-Usage:
-  python tools/compare_render.py <mine.bmp|png> <ref.png> [--crop-top N] [--rows K]
+用法:
+  python tools/compare_render.py <mine.bmp|png> <edge.png> [--crop-top N] [--rows K]
 
-Method: project the "non-background pixels" onto rows/columns to find the segment
-      boundaries of the content bands, then compare the segment positions of both
-      sides, which quantifies layout differences (rather than just eyeballing
-      whether the two "look alike").
---crop-top N: the zero-browser screenshot has N pixels of browser chrome at the top;
-      crop that away before comparing.
+做法: 把“非背景像素”做行/列投影，找出内容带的分段边界，
+      再对比两边的分段位置，从而量化排版差异（而不是只看“像不像”）。
+--crop-top N: zero-browser 截图顶部有 N 像素浏览器外壳，先裁掉再比较。
 """
 import sys
 
@@ -62,7 +59,7 @@ def profile(path, crop_top, axis):
 
 
 def merge(spans, gap=6):
-    """Merge small segments separated by tiny gaps into content bands, for easier comparison."""
+    """把间隔很小的小段合并成内容带，便于对比。"""
     out = []
     for s, e in spans:
         if out and s - out[-1][1] <= gap:
@@ -90,11 +87,11 @@ def main():
         es, espa = profile(edge, 0, axis)
         mt = merge(mspans)
         et = merge(espa)
-        label = "rows (vertical content bands)" if axis == "row" else "cols (horizontal content bands)"
+        label = "行(纵向内容带)" if axis == "row" else "列(横向内容带)"
         print("== %s ==" % label)
-        print("  zero-browser %s segments=%d" % (ms, len(mt)))
+        print("  zero-browser %s 段数=%d" % (ms, len(mt)))
         print("               %s" % (mt[:rows],))
-        print("  reference    %s segments=%d" % (es, len(et)))
+        print("  Edge         %s 段数=%d" % (es, len(et)))
         print("               %s" % (et[:rows],))
     return 0
 

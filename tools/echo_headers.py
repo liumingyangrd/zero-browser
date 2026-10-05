@@ -1,7 +1,6 @@
-"""Tiny echo server: returns the received request headers and Cookie verbatim,
-for verifying UA / Referer / Cookie.
+"""极小的回显服务器：把收到的请求头和 Cookie 原样返回，用于验证 UA / Referer / Cookie。
 
-Usage: python tools/echo_headers.py [port]
+用法: python tools/echo_headers.py [端口]
 """
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer

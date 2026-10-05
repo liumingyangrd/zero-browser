@@ -1,22 +1,19 @@
-// page_media_probe: GUI-less page media probe.
+// page_media_probe: 无 GUI 的页面媒体探针。
 //
-// Goal: reuse the browser's real code path completely (Page::ParseHtml ->
-// BuildMediaPlayers -> UpdateMedia -> Paint), but draw the page onto an in-memory DC and
-// read the pixels back, so that reproducible evidence can be produced without a human
-// eye or a window screenshot:
-//   1. whether the <video> attributes are recognized correctly by the parser
-//      (autoplay / loop / muted / controls)
-//   2. whether the MediaPlayer is ready, whether it is playing, whether it emits frames
-//   3. how many of the pixels finally painted in the video area are not black (proving
-//      the picture really reached the canvas)
+// 目的：完全复用浏览器真实代码路径（Page::ParseHtml -> BuildMediaPlayers ->
+// UpdateMedia -> Paint），但把页面画到内存 DC 上再回读像素，从而在没有人眼和
+// 窗口截图的条件下给出可复现证据：
+//   1. <video> 的属性是否被解析器正确识别（autoplay / loop / muted / controls）
+//   2. MediaPlayer 是否 ready、是否在播放、是否产出帧
+//   3. 视频区域最终画出来的像素里有多少不是黑色（证明画面真的进了画布）
 //
-// Usage:
+// 用法：
 //   page_media_probe <url|file> [--seconds N] [--dump] [--click]
 
-// Note: windows.h must be included first. GdiCanvas::DrawText in gdi.h is affected by
-// the DrawTextA/DrawTextW macros from windows.h, and if gfx.h is expanded before
-// windows.h you get "marked override but does not override". Every translation unit of
-// the browser itself satisfies this order, and the probe must stay consistent with it.
+// 注意：windows.h 必须最先包含。gdi.h 里 GdiCanvas::DrawText 会被 windows.h
+// 的 DrawTextA/DrawTextW 宏影响，若 gfx.h 先于 windows.h 展开就会出现
+// “marked override but does not override”。浏览器本体各编译单元都满足这个
+// 顺序，探针也必须保持一致。
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -48,8 +45,7 @@ std::string ReadFileBinary(const std::string& path) {
                        std::istreambuf_iterator<char>());
 }
 
-// Walk the DOM, print every attribute of the <video> nodes, and check the HasAttr
-// results.
+// 遍历 DOM，打印 <video> 节点的全部属性，并检查 HasAttr 判定结果。
 void DumpVideoNodes(const zb::Node* node) {
     if (!node) return;
     if (node->type == zb::NodeType::Element && node->tag == "video") {
@@ -68,8 +64,7 @@ void DumpVideoNodes(const zb::Node* node) {
     for (const auto& c : node->children) DumpVideoNodes(c.get());
 }
 
-// Find the first <video> box in the layout tree; used for the simulated click and for
-// pixel counting.
+// 在布局树里找第一个 <video> 盒子，用于模拟点击与统计像素。
 const zb::Box* FindVideoBox(const zb::Box* box) {
     if (!box) return nullptr;
     if (box->node && box->node->tag == "video") return box;
@@ -117,8 +112,7 @@ bool SaveBmp32(const char* path, const uint8_t* bgra, int w, int h) {
     return f.good();
 }
 
-// Count the "non-black" pixels inside a rectangle. Returns -1 if the rectangle is
-// invalid.
+// 统计矩形内“非黑”像素数量。返回 -1 表示矩形无效。
 long CountNonBlack(const uint8_t* bgra, int w, int h, const zb::Rect& r) {
     if (!bgra || r.w <= 0 || r.h <= 0) return -1;
     long count = 0;
@@ -166,14 +160,13 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::printf("== DOM attribute check ==\n");
+    std::printf("== DOM 属性检查 ==\n");
     {
         std::unique_ptr<zb::Node> dom = zb::ParseHtml(html);
         DumpVideoNodes(dom.get());
     }
 
-    // In-memory canvas: GdiCanvas creates its own compatible bitmap, and after painting
-    // we BitBlt to the DIB to read the pixels back.
+    // 内存画布：GdiCanvas 自建兼容位图，画完之后再 BitBlt 到 DIB 回读像素。
     HDC memdc = CreateCompatibleDC(nullptr);
     if (!memdc) {
         std::printf("CreateCompatibleDC failed\n");
@@ -197,7 +190,7 @@ int main(int argc, char** argv) {
     zb::Page page;
     page.ParseHtml(html, url);
     page.Relayout(kWidth, kHeight, &canvas);
-    std::printf("== layout ==\n");
+    std::printf("== 布局 ==\n");
     std::printf("title=%s content_height=%d\n", page.Data().title.c_str(),
                 page.ContentHeight());
     const zb::Box* vbox = FindVideoBox(page.RootBox());
@@ -206,18 +199,18 @@ int main(int argc, char** argv) {
                     vbox->rect.y, vbox->rect.w, vbox->rect.h,
                     vbox->hidden ? 1 : 0);
     } else {
-        std::printf("video box: not found\n");
+        std::printf("video box: 未找到\n");
     }
 
     if (click && vbox) {
         int cx = vbox->rect.x + vbox->rect.w / 2;
         int cy = vbox->rect.y + vbox->rect.h / 2;
         bool hit = page.MediaClick(cx, cy);
-        std::printf("== simulated click at picture center (%d,%d) ==\n MediaClick=%d\n", cx, cy,
+        std::printf("== 模拟点击画面中心 (%d,%d) ==\n MediaClick=%d\n", cx, cy,
                     hit ? 1 : 0);
     }
 
-    std::printf("== playback timeline ==\n");
+    std::printf("== 播放时间线 ==\n");
     int painted = 0;
     long last_non_black = -1;
     int last_fw = 0;
@@ -235,9 +228,8 @@ int main(int argc, char** argv) {
             BitBlt(dibdc, 0, 0, kWidth, kHeight, memdc, 0, 0, SRCCOPY);
             GdiFlush();
             const uint8_t* bits = (const uint8_t*)dib_bits;
-            // Count only the "picture area" and exclude the bottom 34px control bar:
-            // otherwise the control bar alone contributes tens of thousands of non-black
-            // pixels, and a fully black picture would still be misjudged as "has content".
+            // 只统计“画面区”，排除底部 34px 控件条：否则控件条本身就会贡献
+            // 上万个非黑像素，画面全黑时也会误判成“有内容”。
             zb::Rect frame_only = vbox ? vbox->rect : zb::Rect{};
             if (frame_only.h > 34) frame_only.h -= 34;
             long nb = vbox ? CountNonBlack(bits, kWidth, kHeight, frame_only) : -1;
@@ -257,7 +249,7 @@ int main(int argc, char** argv) {
                     " | playing=%d ready=%d failed=%d %.2f/%.2f frame=%dx%d%s",
                     p->IsPlaying() ? 1 : 0, p->IsReady() ? 1 : 0,
                     p->Failed() ? 1 : 0, p->Position(), p->Duration(), fw, fh,
-                    has ? "" : "(none)");
+                    has ? "" : "(无)");
                 if (p->Failed()) std::printf(" err=%s", p->Error().c_str());
                 (void)info;
             }
@@ -266,7 +258,7 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::milliseconds(tick_ms));
     }
 
-    // Save the last frame to disk as evidence.
+    // 最后一帧存盘作为证据。
     canvas.FillRect(0, 0, kWidth, kHeight, 0xffffff);
     page.Paint(&canvas, {0, 0, kWidth, kHeight}, 0);
     BitBlt(dibdc, 0, 0, kWidth, kHeight, memdc, 0, 0, SRCCOPY);
@@ -278,12 +270,12 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::printf("== summary ==\n");
+    std::printf("== 汇总 ==\n");
     std::printf("frames painted=%d\n", painted);
     if (last_fw) std::printf("last frame=%dx%d\n", last_fw, last_fh);
     if (last_non_black >= 0) {
         std::printf(
-            "video frame non-black pixels=%ld (excluding the control bar; 0 means the picture is fully black)\n",
+            "video frame non-black pixels=%ld (不含控件条；0 表示画面全黑)\n",
             last_non_black);
     }
 

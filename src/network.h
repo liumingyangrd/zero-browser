@@ -12,8 +12,7 @@ struct FetchResult {
     std::string final_url;
     std::string content_type;
     std::string error;
-    // Raw Set-Cookie response header text (without the prefix), used for
-    // browser-level cookie management.
+    // 原始 Set-Cookie 响应头文本（不含前缀），用于浏览器级 Cookie 管理。
     std::vector<std::string> set_cookie;
 };
 
@@ -29,8 +28,7 @@ bool FetchBinary(const std::string& url, FetchResult* result,
 // Cookie-aware versions: they attach matching cookies and absorb Set-Cookie
 // headers through the process-global jar. Real browser pages should use these
 // so login/state cookies survive across HTML/CSS/image requests.
-// When referer is non-empty a Referer header is sent: many CDNs / image hosts
-// answer with a plain 403 when Referer is missing.
+// referer 非空时会带上 Referer 头：很多 CDN / 图床没有 Referer 会直接 403。
 bool FetchUrlWithCookies(const std::string& url, FetchResult* result,
                          int timeout_ms = 15000,
                          const std::string& referer = std::string());
@@ -38,11 +36,9 @@ bool FetchBinaryWithCookies(const std::string& url, FetchResult* result,
                             int timeout_ms = 30000,
                             const std::string& referer = std::string());
 
-// Fetch a batch of URLs in parallel (internally uses a fixed number of worker
-// threads and reuses the WinHTTP session).
-// A real site needs dozens of images/stylesheets at once; serial fetching pushes
-// first paint out to tens of seconds.
-// referer is sent as the Referer header for these subresource requests.
+// 并行抓取一批 URL（内部用固定数量的工作线程 + 复用 WinHTTP 会话）。
+// 真实站点一次要取几十个图片/样式，串行会把首屏拖到几十秒。
+// referer 会作为这些子资源请求的 Referer 发送。
 void FetchManyParallel(const std::vector<std::string>& urls, int threads,
                        std::vector<FetchResult>* out, int timeout_ms = 15000,
                        bool binary = true,
@@ -51,9 +47,8 @@ void FetchManyParallel(const std::vector<std::string>& urls, int threads,
 // Diagnostic helpers for the network layer.
 std::vector<std::string> CookieJarDump();
 
-// Write a single Set-Cookie style text ("name=value; path=/; max-age=300")
-// into the jar. Used to handle anti-bot challenge pages that set a cookie from
-// script and then reload (see the challenge handling in app.cpp).
+// 把一条 Set-Cookie 形式的文本（"name=value; path=/; max-age=300"）写入 jar。
+// 用于处理「JS 先设置 Cookie 再重载」的反爬挑战页（见 app.cpp 的挑战处理）。
 void CookieJarAbsorbText(const std::string& url, const std::string& set_cookie);
 
 }  // namespace zb

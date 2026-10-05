@@ -1,11 +1,9 @@
-# gui_probe.ps1 -- all-in-one GUI verification script.
+# gui_probe.ps1 —— 一体化 GUI 验证脚本。
 #
-# Why "all-in-one": in this environment a child process started in one pwsh call cannot
-# be queried from another (due to session/permission isolation), so starting, waiting,
-# screenshotting, clicking, reading the log and terminating must all happen inside the
-# same process.
+# 之所以要“一体化”：本环境下跨 pwsh 调用查询不到子进程（受会话/权限隔离影响），
+# 所以启动、等待、截图、点击、读日志、结束必须在同一个进程里完成。
 #
-# Usage:
+# 用法：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\gui_probe.ps1 `
 #       -Url "http://127.0.0.1:8765/video.html" -WaitSeconds 6 `
 #       -Out "build\gui-shot.png" [-ClickX 500 -ClickY 625] [-Out2 "build\gui-shot-click.png"]
@@ -70,7 +68,7 @@ $p = Start-Process -FilePath $exePath -ArgumentList $Url `
 
 Write-Output "pid=$($p.Id) exe=$exePath url=$Url"
 
-# Wait for the main window to appear and finish navigation / media initialization.
+# 等待窗口出现并完成导航 / 媒体初始化。
 $deadline = (Get-Date).AddSeconds($WaitSeconds + 15)
 $hwnd = [IntPtr]::Zero
 while ((Get-Date) -lt $deadline) {

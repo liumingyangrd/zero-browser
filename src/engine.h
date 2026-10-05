@@ -34,8 +34,7 @@ public:
     Page& operator=(const Page&) = delete;
 
     void ParseHtml(const std::string& html, const std::string& url);
-    // The navigation thread has already decoded every <img> into an Image keyed by
-    // absolute URL; here they are bound to DOM nodes by their src attribute.
+    // 导航线程已把 <img> 按绝对 URL 解码成 Image；这里按 src 绑定到 DOM 节点。
     void SetImages(const std::map<std::string, std::shared_ptr<Image>>& images);
     void Relayout(int viewport_w, int viewport_h, Canvas* measurer);
     void Paint(Canvas* canvas, const Rect& viewport, int scroll_y) const;
@@ -48,8 +47,8 @@ public:
     PageData& MutData() { return data_; }
     int ContentHeight() const { return root_box_ ? root_box_->scroll_height : 0; }
     const Box* RootBox() const { return root_box_.get(); }
-    // Read-only accessor for diagnostics: lets the probes under tools/ read each <video>'s
-    // player state. It takes no part in rendering and transfers no ownership.
+    // 诊断用只读访问器：让 tools 下的探针能读到每个 <video> 的播放器状态。
+    // 不参与渲染逻辑，也不转移所有权。
     const std::map<Node*, std::unique_ptr<MediaPlayer>>& MediaPlayers() const {
         return media_;
     }

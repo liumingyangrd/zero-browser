@@ -19,9 +19,8 @@ const wchar_t* kClassW = L"ZeroBrowserSelfBuilt";
 
 const UINT kMsgNavigationDone = WM_APP + 1;
 
-// Shared geometry for the toolbar and the address bar. Painting, hit testing and
-// caret placement must use these same constants, otherwise changing one place and
-// forgetting another causes problems like "the position you see cannot be clicked".
+// 工具栏与地址栏的统一几何。绘制、命中测试、光标定位必须共用这几个常量，
+// 否则改一处忘一处就会出现「看到的位置点不中」这类问题。
 const int kToolbarTop = 38;
 const int kToolbarY = 44;
 const int kToolbarH = 40;
@@ -32,10 +31,9 @@ const int kAddrH = 30;
 const int kAddrPadX = 12;
 const int kAddrFont = 15;
 
-// Start index of the code point before i in UTF-8 text (i must lie on a code point
-// boundary). The empty string and i==0 must be rejected first: otherwise, after i is
-// clamped to 0, i-1 underflows to SIZE_MAX and the s[j] on the next line reads out of
-// bounds (this once caused "typing into an empty address bar crashes").
+// 取 UTF-8 文本里 i 之前一个码点的起始下标（i 需落在码点边界上）。
+// 必须先把空串和 i==0 挡掉：否则 i 被钳成 0 之后 i-1 会下溢成 SIZE_MAX，
+// 下一行的 s[j] 就是越界读（曾经导致「地址栏为空时一输入就崩溃」）。
 size_t Utf8PrevIndex(const std::string& s, size_t i) {
     if (s.empty()) return 0;
     if (i > s.size()) i = s.size();
@@ -45,15 +43,14 @@ size_t Utf8PrevIndex(const std::string& s, size_t i) {
     return j;
 }
 
-// Snap the index onto a code point boundary not past i (returns i unchanged when it
-// is already on a boundary).
+// 把下标吸附到不超过 i 的码点边界上（i 落在边界上时原样返回）。
 size_t Utf8SnapToBoundary(const std::string& s, size_t i) {
     if (i >= s.size()) return s.size();
     while (i > 0 && ((unsigned char)s[i] & 0xC0) == 0x80) i--;
     return i;
 }
 
-// Index just after the code point at i.
+// 取 i 处码点之后的下标。
 size_t Utf8NextIndex(const std::string& s, size_t i) {
     if (i >= s.size()) return s.size();
     unsigned char c = (unsigned char)s[i];
@@ -65,8 +62,7 @@ size_t Utf8NextIndex(const std::string& s, size_t i) {
     return i + len;
 }
 
-// Truncate the text to within max_w pixels, ending with … when too long. Cuts on
-// code point boundaries, so multi-byte characters are never split.
+// 把文本截断到 max_w 像素内，超长以 … 结尾。按码点切，不会切坏汉字。
 std::string EllipsizeText(Canvas& canvas, const std::string& text,
                           int font_size, bool bold, int max_w) {
     if (max_w <= 0) return "";
@@ -111,9 +107,8 @@ struct BmpInfoHeader {
 };
 #pragma pack(pop)
 
-// Write a 32-bit BMP. The alpha channel of a GDI DIB is usually 0, and saving it
-// directly makes image viewers treat the image as fully transparent, so alpha is
-// forced to 255 here to make visual checks after converting to PNG easier.
+// 写 32 位 BMP。GDI 的 DIB 里 alpha 通道通常是 0，直接存盘会被图片查看器
+// 当成全透明，所以这里把 alpha 统一补成 255，方便转 PNG 后肉眼核对。
 bool SaveBgraBmp(const std::string& path, const uint8_t* bgra, int w, int h) {
     if (!bgra || w <= 0 || h <= 0) return false;
     std::vector<uint8_t> copy((size_t)w * h * 4);
@@ -302,7 +297,7 @@ std::string ResolveUrl(const std::string& base, const std::string& href_raw) {
     return origin + NormalizePath(dir + path_part) + query;
 }
 std::string ErrorHtml(const std::string& url, const std::string& error) {
-    std::string e = error.empty() ? "Unable to load the page" : error;
+    std::string e = error.empty() ? "无法加载页面" : error;
     std::string escaped;
     for (char c : e) {
         if (c == '&') escaped += "&amp;";
@@ -317,8 +312,8 @@ std::string ErrorHtml(const std::string& url, const std::string& error) {
         "p{font-size:15px;line-height:1.7;color:#475569}.box{background:#ffffff;"
         "border:1px solid #e2e8f0;border-radius:10px;padding:20px;max-width:720px}"
         "code{background:#e2e8f0;padding:2px 6px;border-radius:4px}"
-        "</style></head><body><div class=\"box\"><h1>Page failed to load</h1>"
-        "<p>Address: <code>" + url + "</code></p><p>" + escaped + "</p></div></body></html>";
+        "</style></head><body><div class=\"box\"><h1>页面加载失败</h1>"
+        "<p>地址: <code>" + url + "</code></p><p>" + escaped + "</p></div></body></html>";
 }
 
 std::string ToLowerAscii(const std::string& s) {
@@ -381,15 +376,13 @@ std::string Base64Decode(const std::string& s) {
     return out;
 }
 
-// Scan <img> elements in the navigation thread, fetching and decoding the image
-// bytes. Transport/decoding only: HTML structure, layout and painting remain the
-// browser's own job.
+// 在导航线程里扫描 <img>，抓取并解码图片字节。只做传输/解码：
+// HTML 结构、布局、绘制仍由浏览器自己负责。
 void LoadImagesForHtml(const std::string& html, const std::string& base_url,
                        std::map<std::string, std::shared_ptr<Image>>& out) {
-    // Collect all URLs that need fetching first, then retrieve them in parallel.
-    // The early implementation fetched serially while scanning: every resource created
-    // a new WinHTTP session (repeating the TLS handshake), and dozens of images/CSS
-    // url() entries on a real site dragged first paint to tens of seconds or forever.
+    // 先把需要抓的 URL 收集齐，再并行取回。
+    // 早期实现是边扫边串行 fetch：每个资源都新建 WinHTTP 会话（重复 TLS 握手），
+    // 真实站点几十个图片/CSS url() 会把首屏拖到几十秒甚至永远加载不完。
     std::vector<std::string> remote;
     auto need_remote = [&](const std::string& abs) {
         if (!StartsWith(abs, "http://") && !StartsWith(abs, "https://")) {
@@ -411,9 +404,8 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         size_t end = lower.find('>', img);
         if (end == std::string::npos) break;
         std::string tag = html.substr(img, end - img + 1);
-        // Keep in sync with ImageSourceOf in dom.h: when src is empty/placeholder,
-        // fall back to the lazy-load attributes, otherwise thumbnails on a mainstream
-        // video site (where the real address lives in data-src) would all be missing.
+        // 与 dom.h 的 ImageSourceOf 保持一致：src 为空/占位时回退到懒加载属性，
+        // 否则 B 站这类站点的缩略图（真实地址在 data-src）会全部缺失。
         std::string src;
         static const char* kSrcAttrs[] = {
             "src",           "data-src",       "data-original",
@@ -471,9 +463,8 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         }
     }
 
-    // background-image: url(...) inside CSS (external stylesheets are already inlined
-    // into <style>). Relative paths resolve against the page address (relative urls
-    // inside external CSS were rewritten to absolute during inlining).
+    // CSS 里的 background-image: url(...)（外部样式表已内联进 <style>）。
+    // 相对路径以页面地址为基准（外部 CSS 内部的相对 url 已在内联时改写为绝对）。
     std::string lower_all = ToLowerAscii(html);
     pos = 0;
     while (true) {
@@ -527,11 +518,10 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
     }
 }
 
-// Expand relative url(...) inside external CSS into absolute addresses.
-// External stylesheets get inlined into <style>, after which url() resolves against
-// the "page address", while relative paths in CSS should be based on "the CSS file's
-// own address" - without this fix background images and fonts would all 404 (real
-// sites almost always use relative paths).
+// 把外部 CSS 里的相对 url(...) 补成绝对地址。
+// 外部样式表会被内联进 <style>，之后 url() 会按“页面地址”解析，
+// 而 CSS 里的相对路径本应以“CSS 文件自身的地址”为基准——不修就会出现
+// 背景图/字体全部 404 的情况（真实站点几乎都是相对路径）。
 std::string AbsolutizeCssUrls(const std::string& css,
                               const std::string& css_url) {
     std::string out;
@@ -610,15 +600,12 @@ std::string InlineExternalStylesheets(const std::string& html,
     return out;
 }
 
-// Handle anti-bot challenge pages that "set a Cookie via JS and then reload" (used by
-// some competitive-programming judge sites and other sites). This is not a JS engine;
-// it only recognizes those few fixed forms on challenge pages:
-//   var X = ["\x61\x62", ...]          string array (with \xNN / \uNNNN escapes)
-//   xxx.cookie = "name=value; ..."     sets a Cookie (including indirect forms such
-//                                      as xxx[Y[0]].cookie)
+// 处理「用 JS 设置 Cookie 再重载」的反爬挑战页（洛谷 / 部分国内站点使用）。
+// 这不是 JS 引擎，只识别挑战页里那几种固定写法：
+//   var X = ["\x61\x62", ...]          字符串数组（含 \xNN / \uNNNN 转义）
+//   xxx.cookie = "name=value; ..."     写 Cookie（含 xxx[Y[0]].cookie 这类间接写法）
 //   window.open("URL","_self") / location.href="URL" / location.replace("URL")
-// On a match, LoadUrlSource writes the Cookie into the jar and re-fetches, which is
-// equivalent to the browser executing that script.
+// 命中后由 LoadUrlSource 把 Cookie 写进 jar 并重新抓取，等价于浏览器执行这段脚本。
 struct CookieChallenge {
     bool found = false;
     std::string cookie;
@@ -656,8 +643,7 @@ std::string UnescapeJsString(const std::string& s) {
     return out;
 }
 
-// Take the first quoted string after key (skipping = and whitespace) and undo JS
-// escapes.
+// 取 key 之后第一个引号串（跳过 = 与空白），并做 JS 转义还原。
 std::string FirstQuotedAfter(const std::string& html, size_t from) {
     size_t q1 = html.find('"', from);
     if (q1 == std::string::npos) return "";
@@ -668,14 +654,12 @@ std::string FirstQuotedAfter(const std::string& html, size_t from) {
 
 CookieChallenge DetectCookieChallenge(const std::string& html) {
     CookieChallenge ch;
-    // Challenge pages are all tiny; cap the size to avoid false positives on normal
-    // pages.
+    // 挑战页都很小；限制体积，避免在正常页面里误伤。
     if (html.empty() || html.size() > 8192) return ch;
     std::string lower = ToLowerAscii(html);
     if (lower.find("cookie") == std::string::npos) return ch;
 
-    // .cookie = "..." assignment (direct or via an array indirection, both boil down
-    // to "find that string")
+    // .cookie = "..." 赋值（直接或经数组间接引用都归结为“找到那段字符串”）
     size_t ck = lower.find(".cookie");
     while (ck != std::string::npos) {
         std::string v = FirstQuotedAfter(html, ck);
@@ -686,7 +670,7 @@ CookieChallenge DetectCookieChallenge(const std::string& html) {
         ck = lower.find(".cookie", ck + 7);
     }
 
-    // Redirect target
+    // 跳转目标
     const char* keys[] = {"window.open(", "location.href", "location.replace(",
                           "location.assign(", "document.location"};
     for (const char* key : keys) {
@@ -720,7 +704,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
         path = PercentDecode(path);
         std::string data = ReadFileUtf8(path);
         if (data.empty()) {
-            *error = "File does not exist or is empty: " + path;
+            *error = "文件不存在或为空: " + path;
             *html = ErrorHtml(u, *error);
             *final_url = u;
             return false;
@@ -733,7 +717,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
     if (StartsWith(u, "data:text/html")) {
         size_t comma = u.find(',');
         if (comma == std::string::npos) {
-            *error = "data URL is missing a comma";
+            *error = "data URL 缺少逗号";
             *html = ErrorHtml(u, *error);
             *final_url = u;
             return false;
@@ -748,10 +732,8 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
         FetchUrlWithCookies(u, &res, 15000);
         if (!res.html.empty()) {
             std::string final = res.final_url.empty() ? u : res.final_url;
-            // Anti-bot challenge page (a competitive-programming judge site, etc.): the
-            // response is a small page whose script sets a Cookie and reloads. We are not
-            // a JS engine, so we only recognize this fixed form, write the Cookie into the
-            // jar and fetch once more.
+            // 反爬挑战页（洛谷等）：响应是个小页面，脚本里设置 Cookie 再重载。
+            // 我们不是 JS 引擎，只识别这种固定写法，把 Cookie 写进 jar 后重新抓一次。
             for (int round = 0; round < 2; ++round) {
                 CookieChallenge ch = DetectCookieChallenge(res.html);
                 if (!ch.found || ch.redirect.empty()) break;
@@ -770,7 +752,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
             return true;
         }
         *error = res.error.empty()
-                     ? "Server returned HTTP " + std::to_string(res.status)
+                     ? "服务器返回 HTTP " + std::to_string(res.status)
                      : res.error;
         *html = ErrorHtml(u, *error);
         *final_url = u;
@@ -784,8 +766,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
         error->clear();
         return true;
     }
-    *error = "Cannot resolve this address; supported schemes are browser://, file://, "
-             "data:text/html, http://, https://";
+    *error = "无法解析这个地址，支持 browser://、file://、data:text/html、http://、https://";
     *html = ErrorHtml(u, *error);
     *final_url = u;
     return false;
@@ -838,9 +819,8 @@ bool BrowserApp::CreateMainWindow(bool visible, int width, int height) {
         ShowWindow(hwnd_, SW_SHOW);
         UpdateWindow(hwnd_);
     } else {
-        // A hidden window does not receive WM_PAINT, but WM_SIZE / WM_TIMER keep
-        // working, which is enough to drive layout, timers and the media thread; the
-        // image is rendered on demand by HeadlessShot.
+        // 隐藏窗口不会收到 WM_PAINT，但 WM_SIZE / WM_TIMER 照常工作，
+        // 足以驱动布局、定时器与媒体线程；画面由 HeadlessShot 主动渲染。
         SetWindowPos(hwnd_, nullptr, 0, 0, width, height,
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
@@ -862,17 +842,15 @@ void BrowserApp::PumpMessages(int ms) {
 
 namespace {
 
-// Collect every <video> box in the layout tree so diagnostics can print exact
-// coordinates.
+// 收集布局树里所有 <video> 盒子，供诊断输出精确坐标。
 void CollectVideoBoxes(const Box* box, std::vector<const Box*>* out) {
     if (!box || !out) return;
     if (box->node && box->node->tag == "video") out->push_back(box);
     for (const auto& c : box->children) CollectVideoBoxes(c.get(), out);
 }
 
-// Dump the layout tree: report both "document coordinates" and the "screen
-// coordinates" the renderer actually uses. fixed subtrees use viewport-local
-// coordinates, and the dump follows the same rule to avoid misjudgement.
+// 转储布局树：同时给出“文档坐标”和渲染器实际使用的“屏幕坐标”。
+// fixed 子树使用视口局部坐标，转储时也照此处理，避免误判。
 void DumpBoxTree(const Box* box, const Rect& viewport, int scroll, int depth,
                  bool fixed_ctx = false) {
     if (!box || depth > 12) return;
@@ -914,8 +892,7 @@ void BrowserApp::LogMediaState(const char* tag) const {
     CollectVideoBoxes(tab.page.RootBox(), &videos);
     for (size_t i = 0; i < videos.size(); ++i) {
         const Box& b = *videos[i];
-        // Report both "document coordinates" and "window coordinates" so click
-        // positions can be computed directly.
+        // 同时给出“文档坐标”和“窗口坐标”，方便直接算点击位置。
         std::printf(
             "  videoBox[%zu] doc=%d,%d,%d,%d screen=%d,%d,%d,%d "
             "controls_y_from=%d\n",
@@ -945,17 +922,16 @@ void BrowserApp::LogMediaState(const char* tag) const {
 
 bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
     if (!CreateMainWindow(false, opt.width, opt.height)) {
-        std::printf("HeadlessShot: failed to create hidden window\n");
+        std::printf("HeadlessShot: 创建隐藏窗口失败\n");
         return false;
     }
-    // A hidden window may not receive WM_SIZE (the system does not resend it when the
-    // size is unchanged), so the viewport size is set explicitly here to ensure layout,
-    // hit testing and click simulation all run in a deterministic state.
+    // 隐藏窗口可能收不到 WM_SIZE（尺寸未变化时系统不会重发），这里显式设定
+    // 视口尺寸，保证布局、命中测试和点击模拟都在确定的状态下进行。
     OnSize(opt.width, opt.height);
 
     HDC mem = CreateCompatibleDC(nullptr);
     if (!mem) {
-        std::printf("HeadlessShot: CreateCompatibleDC failed\n");
+        std::printf("HeadlessShot: CreateCompatibleDC 失败\n");
         return false;
     }
     GdiCanvas canvas(mem, opt.width, opt.height);
@@ -984,8 +960,7 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         PumpMessages(50);
     }
 
-    // Address bar input regression: optionally set the content, then optionally focus,
-    // and finally feed each character through the real OnChar path.
+    // 地址栏输入回归：先（可选）设置内容，再（可选）聚焦，最后逐字符走 OnChar。
     if (!opt.set_address.empty() || opt.focus_address) {
         if (!opt.set_address.empty()) {
             address_text_ = opt.set_address;
@@ -1031,7 +1006,7 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
 
     if (opt.dump_boxes && active_ >= 0 && active_ < (int)tabs_.size()) {
         const TabState& tab = tabs_[active_];
-        std::printf("== layout tree ==\n");
+        std::printf("== 布局树 ==\n");
         DumpBoxTree(tab.page.RootBox(), page_view_, tab.scroll, 0);
     }
 
@@ -1045,7 +1020,7 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
 
     bool ok = true;
     if (!opt.out.empty()) {
-        std::printf("== shot 1: %s ==\n", opt.out.c_str());
+        std::printf("== 截图 1: %s ==\n", opt.out.c_str());
         LogMediaState("before");
         ok = shoot(opt.out) && ok;
         std::printf("saved %s\n", opt.out.c_str());
@@ -1055,7 +1030,7 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         for (size_t i = 0; i < opt.clicks.size(); ++i) {
             int cx = opt.clicks[i].first;
             int cy = opt.clicks[i].second;
-            std::printf("== simulated click %zu: (%d,%d) ==\n", i + 1, cx, cy);
+            std::printf("== 模拟点击 %zu: (%d,%d) ==\n", i + 1, cx, cy);
             OnLButtonDown(cx, cy);
             PumpMessages(opt.after_ms);
             char tag[32];
@@ -1188,9 +1163,8 @@ void BrowserApp::RenderTabs(Canvas& canvas) {
         canvas.FillRoundRect(r.x, r.y, r.w, r.h, 7,
                              active ? 0xffffff : 0x1e293b);
         const TabState& tab = tabs_[i];
-        std::string label = tab.title.empty() ? "Page" : tab.title;
-        // The title must be clipped to the left of the close button, otherwise a long
-        // title covers the × or even overflows the tab.
+        std::string label = tab.title.empty() ? "页面" : tab.title;
+        // 标题要裁在关闭按钮左侧，否则长标题会压住 × 甚至溢出标签外。
         const int kTabFont = 13;
         int max_w = std::max(12, r.w - 9 - 26);
         label = EllipsizeText(canvas, label, kTabFont, active, max_w);
@@ -1228,26 +1202,25 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     canvas.StrokeLine(fwd.x + 10, fwd.y + 8, fwd.x + 19, fwd.y + 14, 0x334155, 2);
     canvas.StrokeLine(fwd.x + 19, fwd.y + 14, fwd.x + 10, fwd.y + 20, 0x334155, 2);
 
-    // Reload: a ring with a gap plus an arrow.
-    // Note Rect is {x, y, w, h}: it was previously passed as {left,top,right,bottom},
-    // so w/h became 94/67 and drew a giant ellipse reaching across to the address bar.
+    // Reload：留缺口的圆环 + 箭头。
+    // 注意 Rect 是 {x, y, w, h}：之前按 {left,top,right,bottom} 传，
+    // w/h 变成 94/67，画出一个横跨到地址栏的巨型椭圆。
     Rect reload{72, 44, 30, 28};
     canvas.FillRoundRect(reload.x, reload.y, reload.w, reload.h, 6, 0xeef2f7);
     const double kPi = 3.14159265358979323846;
     int rcx = reload.x + reload.w / 2;
     int rcy = reload.y + reload.h / 2;
     int rr = 7;
-    int arc_start = 60;   // keep the gap in the top-right corner
-    int arc_sweep = 270;  // sweep 270° counter-clockwise
+    int arc_start = 60;   // 缺口留在右上角
+    int arc_sweep = 270;  // 逆时针扫 270°
     canvas.StrokeArc({rcx - rr, rcy - rr, rr * 2, rr * 2}, arc_start,
                      arc_sweep, 0x334155, 2);
-    // The arrow sits at the start of the arc, oriented along the tangent at that point,
-    // drawn as a small V-shaped arrow
+    // 箭头落在弧的起点上，方向取该点的切线，画成一个小 V 形箭头
     double a0 = arc_start * kPi / 180.0;
     int tip_x = rcx + (int)std::lround(rr * std::cos(a0));
     int tip_y = rcy - (int)std::lround(rr * std::sin(a0));
     for (int sign = -1; sign <= 1; sign += 2) {
-        double ba = a0 + kPi / 2 + sign * 0.45;  // tangent direction ±26°
+        double ba = a0 + kPi / 2 + sign * 0.45;  // 切线方向 ±26°
         int bx = (int)std::lround(std::cos(ba) * 5.5);
         int by = -(int)std::lround(std::sin(ba) * 5.5);
         canvas.StrokeLine(tip_x, tip_y, tip_x - bx, tip_y - by, 0x334155, 2);
@@ -1268,9 +1241,8 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     canvas.FillRoundRect(addr.x, addr.y, addr.w, addr.h, 7, 0xffffff);
     canvas.StrokeRect(addr.x, addr.y, addr.w, addr.h, border);
 
-    // URL text: vertically centered and clipped inside the box (a long URL must not
-    // spill outside the toolbar). It used to be a fixed addr.y + 8, and at font size 15
-    // the bottom of the text sat on/crossed the lower border.
+    // URL 文字：垂直居中，并裁剪在框内（长 URL 不能溢出到工具栏外）。
+    // 之前写成固定 addr.y + 8，字号 15 时文字底部正好压在/穿过下边框。
     const int kAddrFont = 15;
     const int kAddrPadX = 12;
     int text_h = canvas.TextHeight(kAddrFont);
@@ -1316,7 +1288,7 @@ void BrowserApp::RenderStatus(Canvas& canvas) {
                     status_rect_.h, 0x0f172a);
     std::string text;
     if (active_ >= 0 && active_ < (int)tabs_.size() && tabs_[active_].loading) {
-        text = "Loading... " + CurrentUrl();
+        text = "加载中... " + CurrentUrl();
     } else {
         text = CurrentUrl();
     }
@@ -1425,8 +1397,7 @@ void BrowserApp::OnLButtonDown(int x, int y) {
     }
     if (hit.area == HitArea::Address) {
         address_focused_ = true;
-        // Place the caret at the click position (it used to always jump to the end, so
-        // clicking in the middle could not change the insertion point).
+        // 按点击位置定位光标（原来一律跳到末尾，点中间也改不了插入点）。
         int rel = x - (kAddrX + kAddrPadX);
         size_t best_idx = 0;
         int best_diff = std::abs(rel);
@@ -1507,8 +1478,7 @@ void BrowserApp::OnKey(UINT key) {
             return;
         }
         if (key == VK_BACK) {
-            // Delete by UTF-8 code point: deleting a single byte would split a multi-byte
-            // character in half (invalid UTF-8).
+            // 按 UTF-8 码点删除：只删一个字节会把汉字切成半个（非法 UTF-8）。
             if (caret > 0) {
                 size_t prev = Utf8PrevIndex(address_text_, caret);
                 address_text_.erase(prev, caret - prev);
@@ -1567,8 +1537,7 @@ void BrowserApp::OnChar(wchar_t ch) {
     std::string s = WideToUtf8(ws);
     if (caret_ < 0) caret_ = 0;
     if (caret_ > (int)address_text_.size()) caret_ = (int)address_text_.size();
-    // Snap the insertion point to a code point boundary (it is already valid when
-    // caret_ is normal, so it does not shift).
+    // 插入点吸附到码点边界（caret_ 正常时就是它自己，不会移位）。
     caret_ = (int)Utf8SnapToBoundary(address_text_, (size_t)caret_);
     address_text_.insert((size_t)caret_, s);
     caret_ += (int)s.size();

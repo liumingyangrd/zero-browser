@@ -11,11 +11,10 @@
 #include <cstring>
 #include <string>
 
-// --shot headless screenshot diagnostics: reuse the real Render / OnLButtonDown code
-// paths, draw the page into a memory DC and save it as a BMP. It does not rely on
-// desktop window capture, so it can also gather evidence in a restricted session.
+// --shot 无窗口截图诊断：复用真实 Render / OnLButtonDown 代码路径，把页面画到
+// 内存 DC 并存成 BMP。不依赖桌面窗口截图，因此在受限会话里也能取证。
 //
-//   zero-browser.exe --shot --url <address> --out <bmp> [--out2 <bmp>]
+//   zero-browser.exe --shot --url <地址> --out <bmp> [--out2 <bmp>]
 //                    [--wait 6000] [--after 1500] [--size 1180x820]
 //                    [--click X,Y] [--scroll Y]
 static int RunShotMode(int argc, char** argv) {
@@ -77,7 +76,7 @@ static int RunShotMode(int argc, char** argv) {
     }
     if (opt.out.empty()) {
         std::printf(
-            "usage: zero-browser.exe --shot --url <address> --out <bmp> "
+            "用法: zero-browser.exe --shot --url <地址> --out <bmp> "
             "[--out2 <bmp>] [--click X,Y]... [--wait ms] [--after ms] "
             "[--size WxH] [--scroll Y]\n");
         return 1;
@@ -114,8 +113,7 @@ int main(int argc, char** argv) {
         std::printf("content_type=%s\n", res.content_type.c_str());
         std::printf("error=%s\n", res.error.c_str());
         std::printf("bytes=%zu\n", res.html.size());
-        // Optional third argument: write the body to a file, so the content a real
-        // site returns can be inspected offline.
+        // 可选第三个参数：把正文写到文件，便于离线检查真实站点返回的内容。
         if (argc > 3 && *argv[3] && !res.html.empty()) {
             FILE* f = std::fopen(argv[3], "wb");
             if (f) {
@@ -127,8 +125,8 @@ int main(int argc, char** argv) {
         return ok ? 0 : 1;
     }
 
-    // Verify the jar with two Cookie-bearing requests: the first absorbs Set-Cookie,
-    // the second sends the Cookie back to the echo endpoint and prints it.
+    // 两次带 Cookie 的请求验证 jar：第一次吸收 Set-Cookie，
+    // 第二次把 Cookie 发回给 echo 接口并打印。
     bool cookie_test = argc > 1 && std::strcmp(argv[1], "--cookie-test") == 0;
     if (cookie_test && argc >= 4) {
         zb::FetchResult first;

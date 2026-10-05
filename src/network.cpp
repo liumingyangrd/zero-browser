@@ -163,34 +163,31 @@ std::string EnvUtf8(const char* name) {
 std::string Win32Error(const char* what) {
     DWORD err = GetLastError();
     char buf[256];
-    std::snprintf(buf, sizeof(buf), "%s (Win32 error %lu)", what,
+    std::snprintf(buf, sizeof(buf), "%s (Win32 错误 %lu)", what,
                   (unsigned long)err);
     return buf;
 }
 
 // --- Minimal browser-level cookie jar -------------------------------------
-// Real sites rely on login cookies persisting state across requests. This is a
-// common subset of RFC 6265 implemented here: host matching, path prefix,
-// Secure and HttpOnly, and expiry time.
-// It only decides "which cookies may be sent with which request"; it does no
-// validation beyond the same-origin rules.
+// 真实站点（洛谷 / B 站）依赖登录 Cookie 跨请求保持状态。这里按 RFC 6265 的
+// 常用子集实现：host 匹配、路径前缀、Secure 与 HttpOnly、过期时间。
+// 只负责“哪些 Cookie 能发给哪个请求”，没有做同源策略以外的复杂校验。
 
 struct Cookie {
     std::string name;
     std::string value;
     std::string path = "/";
-    std::string host;       // domain that set this cookie
+    std::string host;       // 设置该 Cookie 的域名
     bool secure = false;
     bool http_only = false;
-    long long expires = 0;  // 0 = session; >0 = Unix timestamp
+    long long expires = 0;  // 0 = session; >0 = Unix 时间戳
 };
 
 std::mutex g_cookie_mtx;
 std::vector<Cookie> g_cookies;
 
 std::string HostOf(const std::string& url) {
-    // Only recognises http(s)://host[:port]; the port does not take part in
-    // cookie matching.
+    // 只识别 http(s)://host[:port]，端口不参与 Cookie 匹配。
     size_t scheme = url.find("://");
     if (scheme == std::string::npos) return "";
     size_t start = scheme + 3;
@@ -340,9 +337,8 @@ void AbsorbSetCookies(const std::string& url,
 
 }  // namespace
 
-// Reuse one WinHTTP session per thread. Only session reuse enables connection
-// keep-alive and the TLS session cache: otherwise every image/stylesheet needs a
-// fresh handshake, and dozens of resources on a real site take tens of seconds.
+// 每个线程复用一个 WinHTTP 会话。会话复用才能启用连接保活（keep-alive）与
+// TLS 会话缓存：否则每个图片/样式都要重新握手，真实站点几十个资源要几十秒。
 HINTERNET AcquireSession(DWORD access_type, const wchar_t* named_proxy,
                          int timeout_ms) {
     struct Cache {
@@ -390,7 +386,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 
     HINTERNET session = AcquireSession(access_type, named_proxy, timeout_ms);
     if (!session) {
-        result->error = Win32Error("WinHttpOpen failed");
+        result->error = Win32Error("WinHttpOpen 失败");
         return false;
     }
     WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms,
@@ -412,7 +408,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     uc.dwSchemeLength = (DWORD)(sizeof(scheme) / sizeof(scheme[0]));
 
     if (!WinHttpCrackUrl(wurl.c_str(), (DWORD)wurl.size(), 0, &uc)) {
-        result->error = "cannot parse URL";
+        result->error = "无法解析 URL";
         return false;
     }
 
@@ -422,7 +418,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 
     HINTERNET connect = WinHttpConnect(session, host, (INTERNET_PORT)uc.nPort, 0);
     if (!connect) {
-        result->error = Win32Error("WinHttpConnect failed");
+        result->error = Win32Error("WinHttpConnect 失败");
         return false;
     }
 
@@ -430,7 +426,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
         connect, L"GET", path_with_extra.c_str(), nullptr, WINHTTP_NO_REFERER,
         WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0);
     if (!request) {
-        result->error = Win32Error("WinHttpOpenRequest failed");
+        result->error = Win32Error("WinHttpOpenRequest 失败");
         WinHttpCloseHandle(connect);
         return false;
     }
@@ -457,8 +453,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     WinHttpAddRequestHeaders(request, headers, (DWORD)-1L,
                              WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
 
-    // Many CDNs / image hosts answer 403 outright when Referer is missing, so
-    // subresource requests must carry the originating page.
+    // 很多 CDN / 图床在缺少 Referer 时直接 403，子资源请求要带上来源页。
     if (!referer.empty()) {
         std::wstring wref = U8ToW("Referer: " + referer + "\r\n");
         WinHttpAddRequestHeaders(request, wref.c_str(), (DWORD)-1L,
@@ -479,14 +474,14 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     BOOL sent = WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                                    WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
     if (!sent) {
-        result->error = Win32Error("failed to send request");
+        result->error = Win32Error("请求发送失败");
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
         return false;
     }
 
     if (!WinHttpReceiveResponse(request, nullptr)) {
-        result->error = Win32Error("failed to receive response");
+        result->error = Win32Error("接收响应失败");
         WinHttpCloseHandle(request);
         WinHttpCloseHandle(connect);
         return false;
@@ -516,10 +511,9 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     }
 
     if (use_cookies) {
-        // Fetch the complete raw response headers in one go and parse all
-        // Set-Cookie lines here. Do not rely on the index enumeration of
-        // WinHttpQueryHeaders: the MinGW header signature differs from the
-        // Windows SDK one and drops later headers with the same name.
+        // 一次取回完整原始响应头，自解析所有 Set-Cookie 行。
+        // 不依赖 WinHttpQueryHeaders 的索引枚举：MinGW 的头文件签名与
+        // Windows SDK 不一致，会漏掉同一名字的后续响应头。
         wchar_t raw_buf[16384] = {};
         DWORD raw_len = sizeof(raw_buf);
         if (WinHttpQueryHeaders(
@@ -556,8 +550,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 
     WinHttpCloseHandle(request);
     WinHttpCloseHandle(connect);
-    // Note: the session is owned by the thread-local cache; it must not be
-    // closed here, otherwise the next request would use a dangling handle.
+    // 注意：session 由线程级缓存持有，这里不能关闭，否则下一次请求会用到野句柄。
 
     if (use_cookies) {
         AbsorbSetCookies(result->final_url.empty() ? url : result->final_url,
@@ -569,7 +562,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     result->html = binary ? body : ToUtf8(body, charset);
     result->ok = (status >= 200 && status < 400);
     if (!result->ok && result->html.empty() && result->error.empty()) {
-        result->error = "server returned HTTP " + std::to_string((int)status);
+        result->error = "服务器返回 HTTP " + std::to_string((int)status);
     }
     return true;
 }
@@ -590,11 +583,11 @@ bool FetchWithStrategies(const std::string& url, FetchResult* result,
     std::vector<Attempt> attempts;
     if (!env_proxy.empty()) {
         attempts.push_back({WINHTTP_ACCESS_TYPE_NAMED_PROXY, env_proxy.c_str(),
-                            "proxy from ZB_PROXY"});
+                            "ZB_PROXY 指定代理"});
     }
-    attempts.push_back({WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, "automatic proxy"});
-    attempts.push_back({WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, nullptr, "default proxy"});
-    attempts.push_back({WINHTTP_ACCESS_TYPE_NO_PROXY, nullptr, "direct"});
+    attempts.push_back({WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, "自动代理"});
+    attempts.push_back({WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, nullptr, "默认代理"});
+    attempts.push_back({WINHTTP_ACCESS_TYPE_NO_PROXY, nullptr, "直连"});
 
     std::string all_errors;
     for (const auto& attempt : attempts) {
@@ -605,15 +598,15 @@ bool FetchWithStrategies(const std::string& url, FetchResult* result,
             *result = one;
             return true;
         }
-        std::string detail = one.error.empty() ? "no response" : one.error;
+        std::string detail = one.error.empty() ? "无响应" : one.error;
         if (!all_errors.empty()) all_errors += " | ";
         all_errors += std::string(attempt.label) + ": " + detail;
     }
 
     *result = FetchResult{};
-    if (all_errors.empty()) all_errors = "all connection methods failed";
+    if (all_errors.empty()) all_errors = "所有连接方式都失败";
     if (env_proxy.empty()) {
-        all_errors += " (set the environment variable ZB_PROXY=http://127.0.0.1:port to specify a proxy)";
+        all_errors += "（可设置环境变量 ZB_PROXY=http://127.0.0.1:端口 指定代理）";
     }
     result->error = all_errors;
     return false;
@@ -652,8 +645,7 @@ void FetchManyParallel(const std::vector<std::string>& urls, int threads,
             size_t i = next.fetch_add(1);
             if (i >= urls.size()) break;
             FetchResult res;
-            // Subresources all carry a Referer (pointing at the originating
-            // page), otherwise many CDNs answer 403 outright.
+            // 子资源统一带 Referer（指向来源页），否则很多 CDN 直接 403。
             FetchWithStrategies(urls[i], &res, timeout_ms, binary, true, referer);
             (*out)[i] = std::move(res);
         }
@@ -661,7 +653,7 @@ void FetchManyParallel(const std::vector<std::string>& urls, int threads,
     std::vector<std::thread> pool;
     pool.reserve((size_t)threads);
     for (int t = 0; t < threads - 1; ++t) pool.emplace_back(worker);
-    worker();  // the current thread works too, avoiding one extra RTT of waiting
+    worker();  // 当前线程也干活，避免多等一个 RTT
     for (auto& th : pool) th.join();
 }
 

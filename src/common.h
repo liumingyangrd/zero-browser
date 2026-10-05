@@ -35,7 +35,7 @@ struct Color {
     uint8_t r = 0;
     uint8_t g = 0;
     uint8_t b = 0;
-    // 0~255. CSS rgba()/hsla()/8-digit hex all carry alpha; blend as needed when painting.
+    // 0~255。CSS 的 rgba()/hsla()/8 位 hex 都带透明度，绘制时按需做 alpha 混合。
     uint8_t a = 255;
     bool transparent = true;
 

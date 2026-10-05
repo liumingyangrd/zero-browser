@@ -39,7 +39,7 @@ const char* kHomeHtml = R"HTML(<!DOCTYPE html>
     <div class="card"><h3>CSS engine</h3><p>Selectors (class/ID/descendant/attribute/structural pseudo-classes), box model, flex and grid layout, position and z-index.</p><p><a href="about:css">View CSS capabilities</a></p></div>
     <div class="card"><h3>Media and painting</h3><p>Images/background images are decoded through WIC and video frames through Media Foundation; scaling, clipping, compositing and scrolling are all built in-house.</p></div>
   </div>
-  <div class="foot">Zero Browser 0.1.1 · custom rendering engine · page rendered by zero-browser</div>
+  <div class="foot">Zero Browser 0.1.2 · custom rendering engine · page rendered by zero-browser</div>
 </body></html>
 )HTML";
 
@@ -118,7 +118,7 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
       <tr><td>Layout engine</td><td>Built-in (block / inline / flex / grid / position)</td></tr>
       <tr><td>Transport and decoding</td><td>WinHTTP / Media Foundation / WIC / WASAPI (low-level pipeline only)</td></tr>
       <tr><td>Rendering</td><td>GDI pixel output, no WebView / Chromium</td></tr>
-      <tr><td>Version</td><td>0.1.1</td></tr>
+      <tr><td>Version</td><td>0.1.2</td></tr>
     </table>
   </div>
 </body></html>

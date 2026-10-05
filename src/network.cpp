@@ -362,7 +362,7 @@ HINTERNET AcquireSession(DWORD access_type, const wchar_t* named_proxy,
         cache.handle = nullptr;
     }
     HINTERNET session = WinHttpOpen(
-        L"ZeroBrowser/0.1.1 (self-built engine; system TLS transport)",
+        L"ZeroBrowser/0.1.2 (self-built engine; system TLS transport)",
         access_type, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) return nullptr;
     if (named_proxy && *named_proxy) {

@@ -2,12 +2,14 @@
 rem Zero Browser self-built build script
 rem Transport: WinHTTP (system TLS). Media: Media Foundation + WASAPI.
 rem Engine: self-built HTML/CSS/layout/paint. Console subsystem + FreeConsole.
+rem Static linking: the output is a single portable exe with no MinGW runtime DLLs.
 setlocal
 cd /d "%~dp0"
 
 if not exist build mkdir build
 
 g++ -std=c++17 -O2 -Wall -Wextra ^
+  -static -static-libgcc -static-libstdc++ ^
   src\main.cpp ^
   src\app.cpp ^
   src\engine.cpp ^

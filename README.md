@@ -95,6 +95,13 @@ build.bat
 
 产物：`build\zero-browser.exe`
 
+脚本默认**静态链接**（`-static -static-libgcc -static-libstdc++`），产出单个免依赖 exe
+（约 2.7 MB），除系统 DLL 外不需要额外运行库：
+
+```
+GDI32 / USER32 / KERNEL32 / msvcrt / ole32 / MSIMG32 / WINHTTP / MFPlat / MFReadWrite
+```
+
 链接库（`build.bat` 已包含）：`gdi32 winhttp mfplat mfreadwrite mfuuid ole32 uuid mmdevapi
 strmiids ksuser avrt windowscodecs msimg32`。
 

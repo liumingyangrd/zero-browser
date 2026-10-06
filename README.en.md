@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.4-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -59,6 +59,95 @@ with `grid-column: span N` (including the `1 / 3` form) and `gap`; items are aut
 
 ![CSS Grid](docs/screenshots/grid.png)
 
+### JavaScript (self-built ES5-subset interpreter)
+
+**No third-party engine (V8 / QuickJS / Duktape) is linked in** — the interpreter is implemented
+here, split across these files:
+
+| File | Responsibility |
+| --- | --- |
+| `src/js.cpp` | lexing and parsing, producing the syntax tree |
+| `src/js_eval.cpp` | evaluator: statements/expressions, scopes, calls and the step budget |
+| `src/js_builtins.cpp` | built-in method table (dispatched by receiver type) |
+| `src/js_globals.cpp` | global objects such as `Math` / `JSON` / `Date` / `Error` / `console` |
+| `src/js_dom.cpp` | DOM bindings: `document` / elements / `window` / `location` / events / timers |
+| `src/js.h`, `src/js_internal.h` | public interface and interpreter-internal interface |
+
+**Language features**: `var` / `let` / `const` (**no block scoping** — `let`/`const` behave like
+`var`), function declarations / function expressions / arrow functions, closures, recursion,
+variable and function hoisting, object and array literals, computed property names, template
+strings (**no `${}` interpolation** — that reports a clear error), `for` / `for-in` / `for-of` /
+`while` / `do-while`, `switch` / `case` / `default`, `try` / `catch` / `finally` / `throw`,
+`break` / `continue`, `++` / `--` / compound assignment, the conditional operator,
+`typeof` / `instanceof` / `in` / `delete` / `void`, bitwise operators, loose and strict equality.
+
+**Built-in objects**:
+
+| Object | Implemented |
+| --- | --- |
+| `Object` | `keys` / `values` / `entries` / `assign` / `create` / `defineProperty` / `freeze` |
+| `Array` | `push` / `pop` / `shift` / `unshift` / `slice` / `splice` / `concat` / `join` / `indexOf` / `lastIndexOf` / `includes` / `forEach` / `map` / `filter` / `some` / `every` / `find` / `findIndex` / `reduce` / `sort` / `reverse` / `toString`, statics `isArray` / `from` / `of` |
+| `String` | `charAt` / `charCodeAt` / `indexOf` / `lastIndexOf` / `includes` / `startsWith` / `endsWith` / `slice` / `substring` / `substr` / `toUpperCase` / `toLowerCase` / `trim` / `trimStart` / `trimEnd` / `split` / `replace` / `replaceAll` / `concat` / `repeat` / `padStart` / `padEnd` / `localeCompare`, static `fromCharCode` |
+| `Number` | `toFixed` / `toString(radix)` / `isNaN` / `isFinite` |
+| `Math` | `abs` / `floor` / `ceil` / `round` / `sqrt` / `pow` / `max` / `min` / `random` / `sin` / `cos` / `tan` / `log` / `exp` / `sign` / `trunc` plus `PI` / `E` / `LN2` |
+| `JSON` | `parse` / `stringify` (**errors on circular references** instead of recursing forever) |
+| `Date` | `now` / `parse` and `getTime` / `getFullYear` / `getMonth` / `getDate` / `getHours` / `getMinutes` / `getSeconds` / `getDay` / `toISOString` / `toString` |
+| `Error` | `Error` / `TypeError` / `RangeError` / `ReferenceError` / `SyntaxError` |
+| Global functions | `parseInt` / `parseFloat` / `isNaN` / `isFinite` / `String` / `Number` / `Boolean` / `Array` / `Object` / `Function` / `encodeURI(Component)` / `decodeURI(Component)` |
+| Output | `console.log` / `info` / `warn` / `error` / `debug`, `alert` (**written to the script log**, no system dialog box) |
+
+**DOM bindings**:
+
+- `document`: `getElementById` / `getElementsByTagName` / `getElementsByClassName` /
+  `querySelector` / `querySelectorAll` / `createElement` / `createTextNode` /
+  `write` / `writeln` / `body` / `head` / `documentElement` / `title` / `readyState` /
+  `URL` / `cookie` (**read-only**) / `addEventListener`
+- Elements: `tagName` / `id` / `className` / `classList.add / remove / toggle / contains` /
+  `style.xxx` and `style.cssText` / `style.setProperty` / `innerHTML` / `outerHTML` /
+  `textContent` / `innerText` / `children` / `childNodes` / `parentNode` /
+  `nextSibling` / `previousSibling` / `firstChild` / `lastChild` /
+  `appendChild` / `insertBefore` / `removeChild` / `replaceChild` /
+  `setAttribute` / `getAttribute` / `removeAttribute` / `hasAttribute` /
+  `getBoundingClientRect` / `offsetWidth` / `offsetHeight` / `offsetTop` / `offsetLeft` /
+  `value` / `checked` / `href` / `src` / `click` / `addEventListener` / `querySelector…`
+- `window`: `document` / `location` / `innerWidth` / `innerHeight` / `scrollY` /
+  `scrollTo` / `addEventListener` / `getComputedStyle` (returns `undefined`)
+- `location`: `href` / `pathname` / `search` / `hash` / `host` / `hostname` / `protocol` /
+  `origin` / `assign` / `replace` / `reload`
+
+**Events**: both `addEventListener` and inline attributes (`onclick="..."`) are supported, and
+events **bubble** to `document` and `window`; an event object exposes `type` / `target` /
+`currentTarget` / `clientX` / `clientY` / `preventDefault()` / `stopPropagation()` /
+`defaultPrevented`; a handler returning `false` is equivalent to `preventDefault`; the default
+action of clicking an `<a href>` navigates (unless it is prevented).
+The shell hands real clicks to the script: hit testing **maps the runs / boxes of the layout tree
+back to DOM nodes** (the self-drawn `button` / `input` controls are runs, not Boxes — see pitfall
+33).
+
+**Timers**: `setTimeout` / `setInterval` / `clearTimeout` / `clearInterval` /
+`requestAnimationFrame`, driven by the shell's **60ms heartbeat** (`WM_TIMER`) and **capped at
+512**.
+
+**Script execution**: inline `<script>` and external `<script src>` both run; **an external
+script's body is fetched in parallel with images by the navigation thread and never blocks the
+UI**; scripts run in document order, after the first layout completes, followed by `load` /
+`DOMContentLoaded` dispatch.
+
+**Safety and isolation** (the most important design decision in this layer):
+
+- every script runs **on its own** — exceptions are only logged, **never rethrown**, and never
+  interrupt rendering
+- **infinite loops** are cut off by the step budget (**20 million steps per script**)
+- **infinite recursion** is stopped by the call-depth guard (**200 frames** plus an 8MB thread
+  stack)
+- `null.x`, calling a non-function and syntax errors only affect that one script; the page keeps
+  rendering
+- `JSON.stringify` errors on circular references instead of recursing forever
+
+> This layer only aims at the script coverage real sites need; it does not chase the full language
+> specification. The gaps in the language, built-in objects, DOM and global objects are listed item
+> by item under [Not implemented yet](#not-implemented-yet).
+
 ### position and z-index
 
 `relative` offsets from the in-flow position; `absolute` is taken out of flow; `fixed` is
@@ -95,8 +184,12 @@ made whole pages zero-width), the browser can open real websites and show their 
 
 > Both were fetched from the live network, not local mock-ups. The layout is still rougher than a
 > mainstream browser, for the reasons listed under [Not implemented yet](#not-implemented-yet):
-> there is no JavaScript engine, so anything a script renders (login, playback, lazy-loaded
-> thumbnails) is unavailable.
+> the script subset has limited coverage and there is no `fetch` / `XHR`, so interactions that lean
+> on APIs or on the full language (login, playback, infinite scroll) are still unavailable.
+>
+> The two screenshots above are evidence from **0.1.3 and earlier** (before JS support existed).
+> From 0.1.4 on, `<script>` really executes — see the
+> [JavaScript section](#javascript-self-built-es5-subset-interpreter) above.
 
 ---
 
@@ -289,6 +382,26 @@ build\frame_probe.exe testpage\anim.wmv 2500
 g++ -std=c++17 -O2 tools\atomic_double_check.cpp -o build\atomic_check.exe
 build\atomic_check.exe 2000
 
+:: JS: inline and external scripts, DOM mutation, timers (works windowless too; timers are driven
+:: by WM_TIMER)
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/js.html --out build\js.bmp ^
+    --wait 1500 --size 1100x900 --dump-boxes
+::   expected: [js] scripts=1 failed=0, plus script-generated content such as item-A/B/C, count=3
+::   and interval-ticks=2
+:: Clicking the button (the inline onclick and the addEventListener listener both fire)
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/js.html --out build\js2.bmp ^
+    --wait 1200 --size 1100x900 --click 53,459 --dump-boxes
+::   expected: clicks=1 and clicked-target=BUTTON
+:: Error isolation: after a throw / an undefined function / an infinite loop, later scripts and the
+:: page render must all continue
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/jserr.html --out build\jserr.bmp --wait 2500 --dump-boxes
+::   expected: [js] scripts=4 failed=3, script 4 ok=1, normal content_height
+:: Interpreter self-test (independent of the DOM)
+g++ -std=c++17 -O2 -Isrc tools\js_probe.cpp src\js.cpp src\js_eval.cpp src\js_builtins.cpp src\js_globals.cpp ^
+    -o build\js_probe.exe -Wl,--stack,8388608
+build\js_probe.exe tools\js_selftest.js
+build\js_probe.exe --robust
+
 :: Screenshot structure comparison (mine vs another browser's PNG) and pixel statistics
 python tools\pixelstat.py build\shot.bmp
 python tools\compare_render.py build\mine.bmp other-browser.png --crop-top 78
@@ -296,6 +409,13 @@ python tools\compare_render.py build\mine.bmp other-browser.png --crop-top 78
 :: Echo request headers, to verify User-Agent / Accept-Language / Referer
 python tools\echo_headers.py 8901
 ```
+
+> `--dump-boxes` now **prints the layout tree after the clicks** (it used to print first and click
+> afterwards). The new order is what makes `--click` useful for verifying event handlers:
+> `[js] scripts=…`, `内联脚本 N ok=…`, `listeners=` and `timers=` are all emitted after the
+> dump, and the text visible on the page must already be the post-click content. To see only the
+> layout as it was before the click, drop `--click`; after a layout fix in the same file, the old
+> box coordinates become invalid.
 
 ### Measured results
 
@@ -320,6 +440,29 @@ python tools\echo_headers.py 8901
   intrinsic width)
 - Cookies: `--cookie-test` prints `echo_body=Cookie: auth=abc123; pref=dark` with `jar_size=2`
 - Network: with `ZB_PROXY=http://127.0.0.1:7890` set, `http://example.com` is fetched successfully
+- **JavaScript** (measured windowless with `--shot`; both the script output and the layout come from
+  the real code paths):
+  - `testpage/js.html` (DOM mutation + `createElement`/`appendChild` + `forEach` + `JSON` +
+    `setInterval` + an inline `onclick` + `addEventListener`): `[js] scripts=1 failed=0 listeners=1`,
+    and everything the script generates renders normally — `item-A` / `item-B` / `item-C`,
+    `count=3`, `joined=A|B|C`, `even-sum=6`, `interval-ticks=2`, with `content_height=466`
+  - after clicking the button (`--click 53,459`): `clicks=1` (the inline `onclick`) and
+    `clicked-target=BUTTON` (from `e.target.tagName` inside the `addEventListener`) **both appear**,
+    so the inline attribute and the listener were both dispatched in that single click
+  - `testpage/jserr.html` (a deliberate throw + an undefined function + an infinite loop + a later
+    script): `[js] scripts=4 failed=3`, and the four scripts report
+    `Error: 故意抛出的错误`, `Error: undefined 不是函数` and
+    `Error: 脚本执行步数超限（疑似死循环），已中止` in that order, while **script 4 still reports
+    `ok=1` and the page renders normally at `content_height=140`**
+  - `testpage/jsext.html` + `jsext.js` (external): `外链脚本 1 ok=1`, and the page shows
+    `外链脚本已执行`, `ext-sum=60` and `ext-flag=true`, with listeners=1
+    (the page has 2 scripts in total — external + inline, both `ok=1`)
+  - interpreter self-test: `tools/js_selftest.js` **passes all 139 assertions**
+    (`SUMMARY passed=139 failed=0`); `build\js_probe.exe --robust` **passes all 13 robustness
+    cases** (infinite loop, infinite recursion, syntax error, `null` property, calling a
+    non-function, `catch` recovery, …)
+  - adding JS did not disturb the page regressions: index 577 / images 1861 / grid 467 / forms 469 /
+    flexblocks 233 / video2 864 / position 1200
 - **Structure comparison against another browser** (same local page, same window width, comparing
   row/column content bands with `tools/compare_render.py`): the first content band aligns exactly
   (relative y 22–40 vs 22–40) and later bands differ by about 6px. Before the font-size fix each
@@ -339,6 +482,32 @@ python tools\echo_headers.py 8901
 - Tag/attribute parsing, comments, DOCTYPE, character entities (`&amp;` `&lt;` `&#x...`), void elements
 - Raw-text handling for `<title>` / `<style>` / `<script>` / `<textarea>`; case-insensitive tag and
   attribute names
+
+**JavaScript (self-built ES5-subset interpreter, no third-party engine)**
+- Syntax: `var`/`let`/`const`, function declarations/expressions/arrow functions, closures,
+  recursion, hoisting, object/array literals and computed property names, template strings
+  (no `${}` interpolation), `for`/`for-in`/`for-of`/`while`/`do-while`, `switch`,
+  `try`/`catch`/`finally`/`throw`, `break`/`continue`, `++`/`--`/compound assignment, the
+  conditional operator, `typeof`/`instanceof`/`in`/`delete`/`void`, bitwise operators, loose and
+  strict equality
+- Built-ins: `Object` / `Array` / `String` / `Number` / `Math` / `JSON` / `Date` /
+  the `Error` family / `parseInt` / `parseFloat` / `isNaN` / `isFinite` /
+  `String` / `Number` / `Boolean` / `Array` / `Object` / `Function` /
+  `encodeURI(Component)` / `decodeURI(Component)` / `console.*` / `alert` (writes to the script log)
+- DOM: `document` queries and creation (`getElementById` / `querySelector(All)` / `createElement` …),
+  element attributes and `classList` / `style` / `innerHTML` / `textContent` /
+  `appendChild` / `insertBefore` / `removeChild` / `setAttribute` /
+  `getBoundingClientRect` / `offset*`, `window` / `location`, events (including bubbling)
+- Events: `addEventListener` and the inline `onclick="…"`, bubbling to `document` / `window`,
+  returning `false` as an equivalent of `preventDefault`, the `<a href>` default action navigating
+- Timers: `setTimeout` / `setInterval` / `clearTimeout` / `clearInterval` /
+  `requestAnimationFrame`, driven by the shell's 60ms heartbeat (`WM_TIMER`), capped at 512
+- Scripts: inline and external `<script src>` (an external body is fetched in parallel with images
+  by the navigation thread and does not block the UI), executed in document order, after the first
+  layout, followed by `DOMContentLoaded` / `load` dispatch
+- Isolation: each script runs separately and exceptions are only logged, never rethrown; infinite
+  loops are cut off by the 20-million-steps-per-script budget, infinite recursion by the 200-frame
+  call-depth guard
 
 **Charset**
 - Converts GBK / GB2312 / GB18030 / Big5 / Shift-JIS / EUC-KR / Latin-1 and others to UTF-8 based
@@ -429,10 +598,24 @@ python tools\echo_headers.py 8901
 
 ## Not implemented yet
 
-- **JavaScript**: there is no JS engine, so `<script>` never runs. SPA pages only show the static
-  HTML the server returned; login, playback, infinite scroll and lazy-loaded thumbnails are
-  unavailable. The one exception is **anti-bot challenge pages**: the "script sets a cookie then
-  reloads" pattern is recognised and emulated
+- **JavaScript language features**: no regular expressions (`/.../` literals are unsupported), no
+  `Promise` / `async` / `await`, no generators, no `class` syntax, no destructuring or spread, no
+  `${}` interpolation in template strings (it reports an error), the `Function` constructor does not
+  compile code, and there is no block scoping (`let`/`const` behave like `var`).
+  Strings use **UTF-8 byte semantics** (`length` and indices count bytes, not UTF-16), but every
+  slicing operation **snaps to a code-point boundary**, so it never cuts a character in half.
+  There is no GC: objects use reference counting, so a reference cycle is only reclaimed when the
+  **whole page is destroyed**. There is no `fetch` / `XMLHttpRequest`, so a script cannot issue
+  requests on its own
+- **DOM subset**: only the commonly used subset exists — no `dataset` / `insertAdjacentHTML` /
+  `cloneNode`, no event capture phase, and `addEventListener` supports neither `once` nor `capture`;
+  `document.cookie` is **read-only**; `getComputedStyle` returns `undefined`; a `<style>` inserted
+  through `innerHTML` **does not take effect**
+- **The script fallbacks stay**: the static lazy-load fallback for thumbnails (`src` is a
+  placeholder → fall back to `data-src` / `data-original` / `data-lazy-src` / `srcset`) and the
+  **anti-bot challenge page** handling (the fixed "script sets a cookie then reloads" pattern is
+  recognised and emulated, which is how that judge site can be opened at all) are both still
+  there — having JS does not remove them
 - **Streaming**: HLS / DASH / m3u8 segment fetching is not implemented; only direct media files work
 - **Form interaction**: controls render, but typing, focus traversal and form submission (`Enter`,
   `form` submission) are not implemented
@@ -466,8 +649,23 @@ WinHTTP transport ──> html.cpp parser ──> DOM tree
                                 BitBlt to the window (self-drawn shell in app.cpp)
 ```
 
+JavaScript hangs off **both sides** of that chain: scripts run in document order **after the first
+layout completes** and read/write the same DOM tree through `js_dom.cpp` (a mutation triggers a
+re-layout and repaint), while events and timers return to the interpreter through the shell's 60ms
+`WM_TIMER` heartbeat:
+
+```
+DOM tree <── js_dom.cpp (DOM/event/timer bindings) <── js_eval.cpp (evaluator)
+                                                           ↑
+                                                     js.cpp parsing
+                                                           ↑
+                                    js_builtins.cpp / js_globals.cpp (built-ins)
+```
+
 - Coordinate convention: `screen = viewport origin + document - scroll`; hit testing uses exactly
   the inverse, so painting and clicking share one transform
+- Hit testing ends at a **DOM node**: the run / box found in the layout tree is mapped back to its
+  node, and the event is then handed to the script
 - `--shot` reuses these real paths and only swaps the window for a memory DC, so its output matches
   what the browser paints
 
@@ -490,12 +688,18 @@ zero-browser/
     gdi.cpp / gdi.h       self-managed canvas (32-bit DIB section), text and image output
     image.cpp / image.h   WIC decoding of image bytes to BGRA (with alpha premultiply)
     network.cpp / .h      WinHTTP transport: redirects, gzip, charset normalization, cookie jar, proxy
+    js.cpp                lexing and parsing for the self-built JS interpreter
+    js_eval.cpp           evaluator: scopes, statements/expressions, calls and the step budget
+    js_builtins.cpp       built-in method table (Object/Array/String/Number/Math/JSON/Date/…)
+    js_globals.cpp        global objects such as Math/JSON/Date/Error/console
+    js_dom.cpp / js_dom.h DOM bindings: document/elements/window/location/events/timers
+    js.h / js_internal.h  public interpreter interface and the internal interface
     media.cpp / .h        Media Foundation player (decode, timeline, seek)
     audio_out.cpp / .h    WASAPI audio output
   docs/screenshots/       README screenshots (PNG)
-  testpage/               local test pages (images, grid, flex, position, forms, video, external CSS)
+  testpage/               local test pages (images, grid, flex, position, forms, video, external CSS, JS)
   testmedia/              test clips
-  tools/                  probes and evidence tools (pixel/timeline/header helpers)
+  tools/                  probes and evidence tools (pixel/timeline/header helpers, js_probe.cpp, js_selftest.js)
 ```
 
 ---
@@ -643,6 +847,34 @@ zero-browser/
     then interpreted as UTF-8, producing mojibake. In a windowless `--shot` session `GetKeyState`
     is always 0 as well, so `--hotkey` / `--paste` must take the modifier keys as **explicit
     arguments** — otherwise the branch under test is not the one a user triggers.
+30. **If `Env` (the scope chain) is a value type, closures capture a snapshot instead of a live
+    binding.** The early implementation copied the scope environment by value, so `total` in
+    `var total=0; arr.forEach(function(x){ total += x; })` stayed 0 forever, and assignments to an
+    outer variable inside a `for` body did not count either. The fix is to hold the variable table
+    in a `shared_ptr` and expose it as a reference member: copying an `Env` **yields another handle
+    onto the same scope**, so a binding written through one is visible to every closure.
+31. **In an interactive interpreter, "throwing an error also costs steps" causes infinite
+    recursion.** Once the step limit is hit, throwing an error object that carries `toString` runs
+    the error formatting through `CallFunction` → `JsCall` → `BumpSteps`, which exceeds the limit
+    again, formats again, and recurses forever as
+    `CallFunction` → `ToPrimitive` → `ToString` → `CallFunction` (measured: the stack blows and the
+    process crashes). Fix: after the limit is exceeded **throw a plain string value only**, and
+    format error text with a **JS-free** safe formatter (read the `name` / `message` properties
+    directly — see `ErrorText`).
+32. **`<!doctype html>` used to be rendered as body text.** The parser only recognised uppercase
+    `<!DOCTYPE`, while real pages almost always write it in lowercase, so every page grew an extra
+    line of text at the top. Fix: skip every declaration region starting with `<!` (including
+    `<!-- -->` and `<![CDATA[]]>`) as a whole, **case-insensitively**; also strip the **UTF-8 BOM**
+    (Notepad's "save as UTF-8" writes one by default, and without stripping it `<!doctype` is pushed
+    into the body as well).
+33. **Self-drawn controls are `TextRun`s, not `Box`es, so hit testing that only walks the box tree
+    can never hit a button.** `NodeAt` must check the runs inside a box as well and return the DOM
+    node attached to the run as the more precise hit (`TextRun` gained a `node` field for this);
+    otherwise neither `--click` nor a real click is ever dispatched to a `<button>`.
+34. **The clipboard may be held by another process.** When `OpenClipboard` fails, `GetLastError` is
+    5 (access denied), and even PowerShell's own `Set-Clipboard` fails then. The program must report
+    this case honestly as **"the operation failed"** rather than crashing or silently writing bad
+    data.
 
 ---
 

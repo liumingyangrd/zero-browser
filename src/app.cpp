@@ -889,9 +889,7 @@ CookieChallenge DetectCookieChallenge(const std::string& html) {
 }
 
 bool LoadUrlSource(const std::string& raw_url, std::string* html,
-                   std::string* final_url, std::string* error,
-                   const std::string& post_body = std::string(),
-                   const std::string& post_type = std::string()) {
+                   std::string* final_url, std::string* error) {
     std::string u = NormalizeUrlInput(raw_url);
     if (u.empty() || StartsWith(u, "browser://") || StartsWith(u, "about:")) {
         *html = BuiltinHtml(u.empty() ? "home" : u);
@@ -933,12 +931,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
     }
     if (StartsWith(u, "http://") || StartsWith(u, "https://")) {
         FetchResult res;
-        if (!post_body.empty()) {
-            // 表单 POST：登录这类"提交后再跳转"的流程靠它
-            FetchUrlPostWithCookies(u, post_body, post_type, &res, 15000);
-        } else {
-            FetchUrlWithCookies(u, &res, 15000);
-        }
+        FetchUrlWithCookies(u, &res, 15000);
         if (!res.html.empty()) {
             std::string final = res.final_url.empty() ? u : res.final_url;
             // 反爬挑战页（洛谷等）：响应是个小页面，脚本里设置 Cookie 再重载。
@@ -1766,19 +1759,6 @@ void BrowserApp::OnLButtonDown(int x, int y) {
         // 否则地址栏会一直显示用户敲了一半却没导航的文本。
         AddressClearSelection();
         SyncAddress();
-        // 点击到输入控件就把键盘焦点给它（表单与地址栏互斥）
-        if (active_ >= 0 && active_ < (int)tabs_.size()) {
-            TabState& ft = tabs_[active_];
-            const Node* hn = ft.page.NodeAt(x - page_view_.x,
-                                            y - page_view_.y + ft.scroll);
-            Node* fld = nullptr;
-            if (hn && hn->type == NodeType::Element &&
-                (hn->tag == "input" || hn->tag == "textarea" ||
-                 hn->tag == "select")) {
-                fld = const_cast<Node*>(hn);
-            }
-            FocusField(fld, x - page_view_.x);
-        }
         // 先把点击交给页面脚本：处理器可能 preventDefault 掉默认动作
         // （比如 <a onclick="return false">），也可能自己发起导航。
         if (active_ >= 0 && active_ < (int)tabs_.size()) {
@@ -2091,66 +2071,6 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
-    // 表单焦点：编辑控件文本 / 回车提交 / Esc 取消焦点
-    if (!address_focused_ && active_ >= 0 && active_ < (int)tabs_.size() &&
-        tabs_[active_].field_focused && tabs_[active_].field) {
-        TabState& tab = tabs_[active_];
-        std::string cur = FieldText(tab.field);
-        size_t fc = (size_t)std::max(0, tab.field_caret);
-        if (fc > cur.size()) fc = cur.size();
-        fc = Utf8SnapToBoundary(cur, fc);
-        if (key == VK_RETURN) {
-            SubmitFieldForm(tab.field);
-            return;
-        }
-        if (key == VK_ESCAPE) {
-            FocusField(nullptr, 0);
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-        if (key == VK_BACK) {
-            if (fc > 0) {
-                size_t prev = Utf8PrevIndex(cur, fc);
-                cur.erase(prev, fc - prev);
-                tab.field_caret = (int)prev;
-                SetFieldText(tab.field, cur);
-            }
-            RelayoutActive();
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-        if (key == VK_DELETE) {
-            if (fc < cur.size()) {
-                size_t next = Utf8NextIndex(cur, fc);
-                cur.erase(fc, next - fc);
-                SetFieldText(tab.field, cur);
-            }
-            RelayoutActive();
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-        if (key == VK_LEFT) {
-            tab.field_caret = (int)Utf8PrevIndex(cur, fc);
-            return;
-        }
-        if (key == VK_RIGHT) {
-            tab.field_caret = (int)Utf8NextIndex(cur, fc);
-            return;
-        }
-        if (key == VK_HOME) {
-            tab.field_caret = 0;
-            return;
-        }
-        if (key == VK_END) {
-            tab.field_caret = (int)cur.size();
-            return;
-        }
-        if (key == VK_TAB) {
-            return;  // 焦点切换暂未实现（README 会写明）
-        }
-        return;
-    }
-
     if (!address_focused_) return;
 
     size_t caret = (size_t)std::max(0, caret_);
@@ -2248,25 +2168,7 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
 }
 
 void BrowserApp::OnChar(wchar_t ch) {
-    if (ch < 32) return;
-    // 表单输入：写进控件的值再重新布局，控件文字就会跟着变
-    if (!address_focused_ && active_ >= 0 && active_ < (int)tabs_.size()) {
-        TabState& tab = tabs_[active_];
-        if (tab.field_focused && tab.field) {
-            std::string ins = WideToUtf8(std::wstring(1, ch));
-            std::string cur = FieldText(tab.field);
-            size_t caret = (size_t)std::max(0, tab.field_caret);
-            if (caret > cur.size()) caret = cur.size();
-            caret = Utf8SnapToBoundary(cur, caret);
-            cur.insert(caret, ins);
-            tab.field_caret = (int)(caret + ins.size());
-            SetFieldText(tab.field, cur);
-            RelayoutActive();
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-    }
-    if (!address_focused_) return;
+    if (!address_focused_ || ch < 32) return;
     // 走 AddressInsert：有选择区时先替换掉，插入点与边界处理只有一处实现。
     AddressInsert(WideToUtf8(std::wstring(1, ch)));
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -2549,19 +2451,13 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
     caret_ = (int)address_text_.size();
     InvalidateRect(hwnd_, nullptr, FALSE);
 
-    std::string post_body = post_pending_body_;
-    std::string post_type = post_pending_type_;
-    post_pending_body_.clear();
-    post_pending_type_.clear();
-
     HWND hwnd = hwnd_;
-    std::thread([hwnd, tab_index, seq, target, add_history, post_body,
-                 post_type]() {
+    std::thread([hwnd, tab_index, seq, target, add_history]() {
         std::string html;
         std::string final_url;
         std::string error;
         ULONGLONG t0 = GetTickCount64();
-        LoadUrlSource(target, &html, &final_url, &error, post_body, post_type);
+        LoadUrlSource(target, &html, &final_url, &error);
         ULONGLONG t1 = GetTickCount64();
         std::string res_base = final_url.empty() ? target : final_url;
         double ms_html = (double)(t1 - t0);

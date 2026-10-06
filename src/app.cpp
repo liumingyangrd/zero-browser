@@ -261,7 +261,22 @@ struct NavResult {
     std::map<std::string, std::shared_ptr<Image>> images;
     // 外链脚本正文（<script src>），与图片一样由导航线程取回。
     std::map<std::string, std::string> scripts;
+    // 分段耗时（毫秒）：定位"加载慢"到底慢在哪一段。
+    double ms_html = 0;
+    double ms_images = 0;
+    double ms_scripts = 0;
+    int image_count = 0;
+    int script_count = 0;
 };
+
+// 导航分段耗时（毫秒）。用户反馈"加载慢"时必须能一眼看出慢在哪一段：
+// HTML 传输 / 图片 + 背景图 / 外链脚本。
+static void LogNavTiming(const NavResult& r) {
+    std::printf("[nav] total=%.0fms html=%.0fms images=%.0fms(%d) scripts=%.0fms(%d)\n",
+                r.ms_html + r.ms_images + r.ms_scripts, r.ms_html, r.ms_images,
+                r.image_count, r.ms_scripts, r.script_count);
+}
+
 
 bool FileExists(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
@@ -517,7 +532,7 @@ void LoadScriptsForHtml(const std::string& html, const std::string& base_url,
     if (urls.empty()) return;
     std::vector<std::string> bodies(urls.size());
     std::vector<std::thread> pool;
-    size_t workers = std::min<size_t>(6, urls.size());
+    size_t workers = std::min<size_t>(8, urls.size());
     for (size_t w = 0; w < workers; ++w) {
         pool.emplace_back([&, w]() {
             for (size_t i = w; i < urls.size(); i += workers) {
@@ -526,7 +541,7 @@ void LoadScriptsForHtml(const std::string& html, const std::string& base_url,
                     continue;
                 }
                 FetchResult res;
-                FetchUrlWithCookies(urls[i], &res, 15000);
+                FetchUrlWithCookies(urls[i], &res, 10000);
                 if (res.ok) bodies[i] = res.html;
             }
         });
@@ -668,7 +683,10 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
 
     if (remote.empty()) return;
     std::vector<FetchResult> results;
-    FetchManyParallel(remote, 6, &results, 15000, true, base_url);
+    // 并发与超时直接决定"首屏要等多久"：实测某真实站点首页 31 张图，
+    // 6 线程 + 15s 超时需要 6.8s 才能抓完。提到 12 线程、单资源 10s 超时，
+    // 避免一张慢图拖住整页（本项目目前仍是"等齐再画"，见 README 踩坑）。
+    FetchManyParallel(remote, 12, &results, 10000, true, base_url);
     for (size_t i = 0; i < remote.size() && i < results.size(); ++i) {
         if (results[i].html.empty()) continue;
         auto image = DecodeImage(results[i].html);
@@ -1228,10 +1246,11 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         const TabState& tab = tabs_[active_];
         std::printf(
             "[hotkey] %s focused=%d bytes=%zu caret=%d sel=[%zu,%zu) "
-            "loading=%d pending=%d url=%s\n",
+            "loading=%d pending=%d addr='%s' current=%s pending_url='%s'\n",
             hk.c_str(), address_focused_ ? 1 : 0, address_text_.size(), caret_,
             AddressSelBegin(), AddressSelEnd(), tab.loading ? 1 : 0,
-            tab.pending_seq, CurrentUrl().c_str());
+            tab.pending_seq, address_text_.c_str(), CurrentUrl().c_str(),
+            tab.pending_url.c_str());
         PumpMessages(50);
     }
 
@@ -1580,9 +1599,9 @@ void BrowserApp::RenderStatus(Canvas& canvas) {
                     status_rect_.h, 0x0f172a);
     std::string text;
     if (active_ >= 0 && active_ < (int)tabs_.size() && tabs_[active_].loading) {
-        text = "加载中... " + CurrentUrl();
+        text = "加载中... " + DisplayUrl();
     } else {
-        text = CurrentUrl();
+        text = DisplayUrl();
     }
     if (text.empty()) text = "Zero Browser";
     canvas.DrawText(text, status_rect_.x + 10, status_rect_.y + 5, 12,
@@ -2035,10 +2054,14 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
     if (key == VK_RETURN) {
         // 空地址栏按回车：原来会 NavigateTo("")，把空串当地址去解析。
         // 这里按「什么都没输入」处理，只退出编辑状态。
-        if (!address_text_.empty()) NavigateTo(address_text_, true);
+        std::string typed = address_text_;
+        if (!typed.empty()) NavigateTo(typed, true);
         address_focused_ = false;
         AddressClearSelection();
-        SyncAddress();
+        // 这里刻意不调用 SyncAddress：它会用"当前已加载的地址"覆盖地址栏，
+        // 而那要等加载完成才更新 —— 用户看到的表现就是"输入后地址栏没变"。
+        // NavigateTo 已经把地址栏设成目标地址（pending_url），保持它。
+        caret_ = (int)address_text_.size();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
@@ -2176,9 +2199,17 @@ std::string BrowserApp::CurrentUrl() const {
     return tabs_[active_].url;
 }
 
+std::string BrowserApp::DisplayUrl() const {
+    if (active_ >= 0 && active_ < (int)tabs_.size()) {
+        const TabState& tab = tabs_[active_];
+        if (!tab.pending_url.empty()) return tab.pending_url;
+    }
+    return CurrentUrl();
+}
+
 void BrowserApp::SyncAddress() {
     if (!address_focused_) {
-        address_text_ = CurrentUrl();
+        address_text_ = DisplayUrl();
         // 失焦后插入点与选择区必须一起复位：否则下次聚焦会带着一个指向
         // 旧文本的选择区（下标可能已经越界），一粘贴就写到错误位置。
         caret_ = (int)address_text_.size();
@@ -2202,6 +2233,7 @@ void BrowserApp::RelayoutTab(int index) {
 void BrowserApp::OnNavigationDone(LPARAM l) {
     NavResult* raw = reinterpret_cast<NavResult*>(l);
     if (!raw) return;
+    LogNavTiming(*raw);
     FinishNavigate(raw->tab_index, raw->seq, raw->requested, raw->html,
                    raw->final_url, raw->error, raw->add_history, raw->images,
                    raw->scripts);
@@ -2221,6 +2253,7 @@ void BrowserApp::FinishNavigate(int tab_index, int seq,
     if (tab.pending_seq != seq) return;
     tab.pending_seq = -1;
     tab.loading = false;
+    tab.pending_url.clear();
 
     std::string resolved = final_url.empty() ? requested : final_url;
     tab.url = resolved;
@@ -2263,6 +2296,7 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
 
     address_focused_ = false;
     address_text_ = target;
+    tab.pending_url = target;
     caret_ = (int)address_text_.size();
     InvalidateRect(hwnd_, nullptr, FALSE);
 
@@ -2271,7 +2305,9 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
         std::string html;
         std::string final_url;
         std::string error;
+        ULONGLONG t0 = GetTickCount64();
         LoadUrlSource(target, &html, &final_url, &error);
+        ULONGLONG t1 = GetTickCount64();
         NavResult* res = new NavResult();
         res->tab_index = tab_index;
         res->seq = seq;
@@ -2282,8 +2318,15 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
         res->add_history = add_history;
         std::string res_base = final_url.empty() ? target : final_url;
         LoadImagesForHtml(html, res_base, res->images);
+        ULONGLONG t2 = GetTickCount64();
         // 外链脚本与图片一样在导航线程取回：UI 线程只负责解析与执行
         LoadScriptsForHtml(html, res_base, res->scripts);
+        ULONGLONG t3 = GetTickCount64();
+        res->ms_html = (double)(t1 - t0);
+        res->ms_images = (double)(t2 - t1);
+        res->ms_scripts = (double)(t3 - t2);
+        res->image_count = (int)res->images.size();
+        res->script_count = (int)res->scripts.size();
         if (!PostMessage(hwnd, kMsgNavigationDone, 0, (LPARAM)res)) {
             delete res;
         }

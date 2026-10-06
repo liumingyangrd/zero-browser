@@ -45,6 +45,9 @@ struct TabState {
     int history_index = -1;
     int pending_seq = -1;
     bool loading = false;
+    // 正在加载的目标地址。加载期间地址栏与状态栏显示它，而不是等加载完成才更新
+    // 的 url —— 否则按下回车后地址栏会立刻弹回上一个页面（实测的 bug）。
+    std::string pending_url;
 };
 
 class BrowserApp {
@@ -158,6 +161,8 @@ private:
                         const std::map<std::string, std::string>& scripts);
     void OnNavigationDone(LPARAM l);
     std::string CurrentUrl() const;
+    // 界面显示用的地址：有正在加载的目标就显示它，否则显示当前页面地址。
+    std::string DisplayUrl() const;
     TabState& ActiveTab();
     const TabState& ActiveTab() const;
     // 标签宽度只在标签数量/窗口宽度变化时变，绘制与命中测试必须同源。

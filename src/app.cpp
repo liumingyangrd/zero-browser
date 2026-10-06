@@ -21,27 +21,27 @@ namespace {
 const wchar_t* kClassW = L"ZeroBrowserSelfBuilt";
 
 const UINT kMsgNavigationDone = WM_APP + 1;
-// 资源（图片 + 外链脚本）取完后的第二阶段消息，见 StartNavigate。
+
 const UINT kMsgAssetsDone = WM_APP + 2;
 
-// 工具栏与地址栏的统一几何。绘制、命中测试、光标定位必须共用这几个常量，
-// 否则改一处忘一处就会出现「看到的位置点不中」这类问题。
+
+
 const int kToolbarTop = 38;
 const int kToolbarY = 44;
 const int kToolbarH = 40;
 const int kBtnSize = 30;
 const int kBtnHeight = 28;
-// 设置齿轮。放在 Home 右边，地址栏相应右移 —— 这几个常量是绘制/命中/光标
-// 共用的，改一处就够（见文件头这段注释的由来）。
+
+
 const int kSettingsX = 136;
 const int kAddrX = 176;
 const int kAddrH = 30;
 const int kAddrPadX = 12;
 const int kAddrFont = 15;
 
-// 取 UTF-8 文本里 i 之前一个码点的起始下标（i 需落在码点边界上）。
-// 必须先把空串和 i==0 挡掉：否则 i 被钳成 0 之后 i-1 会下溢成 SIZE_MAX，
-// 下一行的 s[j] 就是越界读（曾经导致「地址栏为空时一输入就崩溃」）。
+
+
+
 size_t Utf8PrevIndex(const std::string& s, size_t i) {
     if (s.empty()) return 0;
     if (i > s.size()) i = s.size();
@@ -51,14 +51,14 @@ size_t Utf8PrevIndex(const std::string& s, size_t i) {
     return j;
 }
 
-// 把下标吸附到不超过 i 的码点边界上（i 落在边界上时原样返回）。
+
 size_t Utf8SnapToBoundary(const std::string& s, size_t i) {
     if (i >= s.size()) return s.size();
     while (i > 0 && ((unsigned char)s[i] & 0xC0) == 0x80) i--;
     return i;
 }
 
-// 取 i 处码点之后的下标。
+
 size_t Utf8NextIndex(const std::string& s, size_t i) {
     if (i >= s.size()) return s.size();
     unsigned char c = (unsigned char)s[i];
@@ -70,38 +70,38 @@ size_t Utf8NextIndex(const std::string& s, size_t i) {
     return i + len;
 }
 
-// ---- 地址栏剪贴板 ----------------------------------------------------------
-// 右键菜单命令 ID。用 TrackPopupMenu 的 TPM_RETURNCMD 直接取返回值，不需要
-// WM_COMMAND 分发（窗口类没有菜单资源，多一层转发只会多一处出错的地方）。
+
+
+
 const UINT kMenuCut = 1;
 const UINT kMenuCopy = 2;
 const UINT kMenuPaste = 3;
 const UINT kMenuSelectAll = 4;
 
-// 粘贴长度上限：地址栏是单行输入框，粘几 MB 文本只会把界面拖死。
+
 const size_t kClipboardMaxBytes = 8192;
 
-// 地址栏只能放单行：丢掉换行、制表符、其它 C0/C1 控制字符与 U+2028/2029。
-// 这一步不能省：剪贴板文本常带尾随换行，直接拼进 URL 后 ResolveUrl 与
-// WinHttpOpen 会拿到带 \n 的地址（导航失败，或请求行被污染）。
-// 按字节扫描即可，ASCII 与多字节序列的首字节互不冲突，不会切坏 UTF-8。
+
+
+
+
 std::string SanitizeSingleLine(const std::string& text) {
     std::string out;
     out.reserve(text.size());
     for (size_t i = 0; i < text.size();) {
         unsigned char c = (unsigned char)text[i];
-        if (c < 0x20 || c == 0x7F) {  // C0 控制字符（含 \r \n \t）
+        if (c < 0x20 || c == 0x7F) {  
             i += 1;
             continue;
         }
-        if (c == 0xC2 && i + 1 < text.size()) {  // U+0080..U+009F（C1 控制字符）
+        if (c == 0xC2 && i + 1 < text.size()) {  
             unsigned char d = (unsigned char)text[i + 1];
             if (d >= 0x80 && d <= 0x9F) {
                 i += 2;
                 continue;
             }
         }
-        if (c == 0xE2 && i + 2 < text.size() &&  // U+2028 / U+2029 行分隔符
+        if (c == 0xE2 && i + 2 < text.size() &&  
             (unsigned char)text[i + 1] == 0x80 &&
             ((unsigned char)text[i + 2] == 0xA8 ||
              (unsigned char)text[i + 2] == 0xA9)) {
@@ -117,8 +117,8 @@ std::string SanitizeSingleLine(const std::string& text) {
     return out;
 }
 
-// 读剪贴板文本并转 UTF-8：优先 CF_UNICODETEXT，退回 CF_TEXT（按系统 ANSI 代码页解）。
-// 打不开剪贴板（被别的进程占用）时返回空串，绝不让插入路径读到未初始化数据。
+
+
 std::string ReadClipboardText(HWND owner) {
     std::string raw;
     if (OpenClipboard(owner)) {
@@ -131,8 +131,8 @@ std::string ReadClipboardText(HWND owner) {
             if (const char* p = (const char*)GlobalLock(h)) {
                 int n = MultiByteToWideChar(CP_ACP, 0, p, -1, nullptr, 0);
                 if (n > 1) {
-                    // 必须整块 n 个 wchar_t 的缓冲：字符串 size 给 n-1 再让 API
-                    // 写 n 个（含结尾 \0）会越界一个 wchar_t。
+                    
+                    
                     std::vector<wchar_t> buf((size_t)n);
                     MultiByteToWideChar(CP_ACP, 0, p, -1, buf.data(), n);
                     raw = WideToUtf8(std::wstring(buf.data()));
@@ -145,8 +145,8 @@ std::string ReadClipboardText(HWND owner) {
     return SanitizeSingleLine(raw);
 }
 
-// 写剪贴板（CF_UNICODETEXT）。SetClipboardData 成功后内存归系统所有，
-// 不能再 GlobalFree —— 只有失败时才由本进程释放，否则就是双重释放。
+
+
 bool WriteClipboardText(HWND owner, const std::string& utf8) {
     std::wstring wide = Utf8ToWide(utf8);
     if (!OpenClipboard(owner)) return false;
@@ -171,7 +171,7 @@ bool ClipboardHasText() {
            IsClipboardFormatAvailable(CF_TEXT) != FALSE;
 }
 
-// 把文本截断到 max_w 像素内，超长以 … 结尾。按码点切，不会切坏汉字。
+
 std::string EllipsizeText(Canvas& canvas, const std::string& text,
                           int font_size, bool bold, int max_w) {
     if (max_w <= 0) return "";
@@ -216,8 +216,8 @@ struct BmpInfoHeader {
 };
 #pragma pack(pop)
 
-// 写 32 位 BMP。GDI 的 DIB 里 alpha 通道通常是 0，直接存盘会被图片查看器
-// 当成全透明，所以这里把 alpha 统一补成 255，方便转 PNG 后肉眼核对。
+
+
 bool SaveBgraBmp(const std::string& path, const uint8_t* bgra, int w, int h) {
     if (!bgra || w <= 0 || h <= 0) return false;
     std::vector<uint8_t> copy((size_t)w * h * 4);
@@ -232,7 +232,7 @@ bool SaveBgraBmp(const std::string& path, const uint8_t* bgra, int w, int h) {
     BmpFileHeader fh;
     BmpInfoHeader ih;
     ih.width = w;
-    ih.height = -h;  // top-down
+    ih.height = -h;  
     ih.size_image = (uint32_t)copy.size();
     fh.size = sizeof(fh) + sizeof(ih) + ih.size_image;
     f.write((const char*)&fh, sizeof(fh));
@@ -265,10 +265,10 @@ struct NavResult {
     std::string error;
     bool add_history = false;
     std::map<std::string, std::shared_ptr<Image>> images;
-    // 外链脚本正文（<script src>），与图片一样由导航线程取回。
+    
     std::map<std::string, std::string> scripts;
-    // 分段耗时（毫秒）：定位"加载慢"到底慢在哪一段。
-    // true 表示这是"资源阶段"的回执（图片 + 外链脚本），不是导航完成。
+    
+    
     bool assets_phase = false;
     double ms_html = 0;
     double ms_images = 0;
@@ -277,8 +277,8 @@ struct NavResult {
     int script_count = 0;
 };
 
-// 导航分段耗时（毫秒）。用户反馈"加载慢"时必须能一眼看出慢在哪一段：
-// HTML 传输 / 图片 + 背景图 / 外链脚本。
+
+
 static void LogNavTiming(const NavResult& r) {
     std::printf("[nav] total=%.0fms html=%.0fms images=%.0fms(%d) scripts=%.0fms(%d)\n",
                 r.ms_html + r.ms_images + r.ms_scripts, r.ms_html, r.ms_images,
@@ -425,7 +425,7 @@ std::string ResolveUrl(const std::string& base, const std::string& href_raw) {
     return origin + NormalizePath(dir + path_part) + query;
 }
 
-// 表单编码：x-www-form-urlencoded（空格用 +，其余非字母数字按 %XX）。
+
 std::string FormEncode(const std::string& v) {
     static const char* hex = "0123456789ABCDEF";
     std::string out;
@@ -525,8 +525,8 @@ std::string Base64Decode(const std::string& s) {
     return out;
 }
 
-// 在导航线程里扫描 <script src>，取回正文文本。
-// 与图片一样只做传输：脚本的解析与执行在页面线程（js_dom）。
+
+
 void LoadScriptsForHtml(const std::string& html, const std::string& base_url,
                         std::map<std::string, std::string>& out) {
     std::string lower = ToLowerAscii(html);
@@ -581,13 +581,13 @@ void LoadScriptsForHtml(const std::string& html, const std::string& base_url,
     }
 }
 
-// 在导航线程里扫描 <img>，抓取并解码图片字节。只做传输/解码：
-// HTML 结构、布局、绘制仍由浏览器自己负责。
+
+
 void LoadImagesForHtml(const std::string& html, const std::string& base_url,
                        std::map<std::string, std::shared_ptr<Image>>& out) {
-    // 先把需要抓的 URL 收集齐，再并行取回。
-    // 早期实现是边扫边串行 fetch：每个资源都新建 WinHTTP 会话（重复 TLS 握手），
-    // 真实站点几十个图片/CSS url() 会把首屏拖到几十秒甚至永远加载不完。
+    
+    
+    
     std::vector<std::string> remote;
     auto need_remote = [&](const std::string& abs) {
         if (!StartsWith(abs, "http://") && !StartsWith(abs, "https://")) {
@@ -609,8 +609,8 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         size_t end = lower.find('>', img);
         if (end == std::string::npos) break;
         std::string tag = html.substr(img, end - img + 1);
-        // 与 dom.h 的 ImageSourceOf 保持一致：src 为空/占位时回退到懒加载属性，
-        // 否则大型视频站这类站点的缩略图（真实地址在 data-src）会全部缺失。
+        
+        
         std::string src;
         static const char* kSrcAttrs[] = {
             "src",           "data-src",       "data-original",
@@ -668,8 +668,8 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         }
     }
 
-    // CSS 里的 background-image: url(...)（外部样式表已内联进 <style>）。
-    // 相对路径以页面地址为基准（外部 CSS 内部的相对 url 已在内联时改写为绝对）。
+    
+    
     std::string lower_all = ToLowerAscii(html);
     pos = 0;
     while (true) {
@@ -712,9 +712,9 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
 
     if (remote.empty()) return;
     std::vector<FetchResult> results;
-    // 并发与超时直接决定"首屏要等多久"：实测某真实站点首页 31 张图，
-    // 6 线程 + 15s 超时需要 6.8s 才能抓完。提到 12 线程、单资源 10s 超时，
-    // 避免一张慢图拖住整页（本项目目前仍是"等齐再画"，见 README 踩坑）。
+    
+    
+    
     FetchManyParallel(remote, 12, &results, 10000, true, base_url);
     for (size_t i = 0; i < remote.size() && i < results.size(); ++i) {
         if (results[i].html.empty()) continue;
@@ -726,10 +726,10 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
     }
 }
 
-// 把外部 CSS 里的相对 url(...) 补成绝对地址。
-// 外部样式表会被内联进 <style>，之后 url() 会按“页面地址”解析，
-// 而 CSS 里的相对路径本应以“CSS 文件自身的地址”为基准——不修就会出现
-// 背景图/字体全部 404 的情况（真实站点几乎都是相对路径）。
+
+
+
+
 std::string AbsolutizeCssUrls(const std::string& css,
                               const std::string& css_url) {
     std::string out;
@@ -766,7 +766,7 @@ std::string AbsolutizeCssUrls(const std::string& css,
     return out;
 }
 
-// Pull in external stylesheets so the self-built CSS engine sees them.
+
 std::string InlineExternalStylesheets(const std::string& html,
                                       const std::string& base_url) {
     std::string lower = ToLowerAscii(html);
@@ -808,12 +808,12 @@ std::string InlineExternalStylesheets(const std::string& html,
     return out;
 }
 
-// 处理「用 JS 设置 Cookie 再重载」的反爬挑战页（某评测站 / 部分国内站点使用）。
-// 这不是 JS 引擎，只识别挑战页里那几种固定写法：
-//   var X = ["\x61\x62", ...]          字符串数组（含 \xNN / \uNNNN 转义）
-//   xxx.cookie = "name=value; ..."     写 Cookie（含 xxx[Y[0]].cookie 这类间接写法）
-//   window.open("URL","_self") / location.href="URL" / location.replace("URL")
-// 命中后由 LoadUrlSource 把 Cookie 写进 jar 并重新抓取，等价于浏览器执行这段脚本。
+
+
+
+
+
+
 struct CookieChallenge {
     bool found = false;
     std::string cookie;
@@ -851,7 +851,7 @@ std::string UnescapeJsString(const std::string& s) {
     return out;
 }
 
-// 取 key 之后第一个引号串（跳过 = 与空白），并做 JS 转义还原。
+
 std::string FirstQuotedAfter(const std::string& html, size_t from) {
     size_t q1 = html.find('"', from);
     if (q1 == std::string::npos) return "";
@@ -862,12 +862,12 @@ std::string FirstQuotedAfter(const std::string& html, size_t from) {
 
 CookieChallenge DetectCookieChallenge(const std::string& html) {
     CookieChallenge ch;
-    // 挑战页都很小；限制体积，避免在正常页面里误伤。
+    
     if (html.empty() || html.size() > 8192) return ch;
     std::string lower = ToLowerAscii(html);
     if (lower.find("cookie") == std::string::npos) return ch;
 
-    // .cookie = "..." 赋值（直接或经数组间接引用都归结为“找到那段字符串”）
+    
     size_t ck = lower.find(".cookie");
     while (ck != std::string::npos) {
         std::string v = FirstQuotedAfter(html, ck);
@@ -878,7 +878,7 @@ CookieChallenge DetectCookieChallenge(const std::string& html) {
         ck = lower.find(".cookie", ck + 7);
     }
 
-    // 跳转目标
+    
     const char* keys[] = {"window.open(", "location.href", "location.replace(",
                           "location.assign(", "document.location"};
     for (const char* key : keys) {
@@ -894,10 +894,10 @@ CookieChallenge DetectCookieChallenge(const std::string& html) {
     return ch;
 }
 
-// 内置页查询串里的设置项：browser://settings?lang=en。
-// 在**UI 线程**、开导航线程之前调用，这样导航线程拿到的一定是新语言，
-// 也就不需要在两个线程之间同步设置。
-// 只有真的变了才落盘，免得每次点一下都写文件。
+
+
+
+
 void ApplyBuiltinQuery(const std::string& url) {
     size_t q = url.find('?');
     if (q == std::string::npos) return;
@@ -912,8 +912,8 @@ void ApplyBuiltinQuery(const std::string& url) {
         if (next == before) continue;
         MutableSettings().lang = next;
         bool saved = SaveSettings();
-        // 用 printf 而不是 LogStartup：后者在非 ZB_DEBUG 构建里是空的，
-        // 而这一行要能被 --shot 的无窗口回归断言到。
+        
+        
         std::printf("[settings] lang=%s saved=%d file=%s\n", UiLangSetting(),
                     saved ? 1 : 0, SettingsFilePath().c_str());
     }
@@ -965,15 +965,15 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
     if (StartsWith(u, "http://") || StartsWith(u, "https://")) {
         FetchResult res;
         if (!post_body.empty()) {
-            // 表单 POST：登录这类"提交后再跳转"的流程靠它
+            
             FetchUrlPostWithCookies(u, post_body, post_type, &res, 15000);
         } else {
             FetchUrlWithCookies(u, &res, 15000);
         }
         if (!res.html.empty()) {
             std::string final = res.final_url.empty() ? u : res.final_url;
-            // 反爬挑战页（某评测站等）：响应是个小页面，脚本里设置 Cookie 再重载。
-            // 我们不是 JS 引擎，只识别这种固定写法，把 Cookie 写进 jar 后重新抓一次。
+            
+            
             for (int round = 0; round < 2; ++round) {
                 CookieChallenge ch = DetectCookieChallenge(res.html);
                 if (!ch.found || ch.redirect.empty()) break;
@@ -1012,10 +1012,10 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
     return false;
 }
 
-}  // namespace
+}  
 
 BrowserApp::BrowserApp(HINSTANCE inst) : inst_(inst) {
-    // 界面语言要在这里读出来：第一次生成内置页（browser://home）就会用到它。
+    
     LoadSettings();
     std::printf("[settings] lang=%s effective=%s file=%s\n", UiLangSetting(),
                 UiLangCode(), SettingsFilePath().c_str());
@@ -1057,8 +1057,8 @@ bool BrowserApp::CreateMainWindow(bool visible, int width, int height) {
 
     SetTimer(hwnd_, caret_timer_, 450, nullptr);
     SetTimer(hwnd_, video_timer_, 33, nullptr);
-    // JS 定时器心跳。60ms 是 setTimeout(fn,0) 与 requestAnimationFrame 的
-    // 实际粒度下限；页面没有脚本时 OnJsTick 只做一次判断就返回。
+    
+    
     SetTimer(hwnd_, js_timer_, 60, nullptr);
     TabState home;
     home.url = "browser://home";
@@ -1067,8 +1067,8 @@ bool BrowserApp::CreateMainWindow(bool visible, int width, int height) {
         ShowWindow(hwnd_, SW_SHOW);
         UpdateWindow(hwnd_);
     } else {
-        // 隐藏窗口不会收到 WM_PAINT，但 WM_SIZE / WM_TIMER 照常工作，
-        // 足以驱动布局、定时器与媒体线程；画面由 HeadlessShot 主动渲染。
+        
+        
         SetWindowPos(hwnd_, nullptr, 0, 0, width, height,
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
@@ -1090,8 +1090,8 @@ void BrowserApp::PumpMessages(int ms) {
 
 namespace {
 
-// 高精度计时（毫秒）。不能用 GetTickCount64：它只有约 15.6ms 的分辨率，
-// 量"重排花了多少毫秒"这种几毫秒到几十毫秒的开销完全不够用。
+
+
 double NowMs() {
     static const double kTicksPerMs = [] {
         LARGE_INTEGER f{};
@@ -1103,9 +1103,9 @@ double NowMs() {
     return (double)c.QuadPart / kTicksPerMs;
 }
 
-// 重排超过这个毫秒数就打一行诊断（可用 ZB_PERF_MS 覆盖）。
-// 默认 4ms：低于它的是常态（输入一个字也会重排一次），打出来只会淹没有用信息；
-// 排查卡顿时设 ZB_PERF_MS=0 就能看到每一次重排的真实开销。
+
+
+
 double RelayoutLogThresholdMs() {
     static const double kDefault = 4.0;
     static const double kValue = [] {
@@ -1117,9 +1117,9 @@ double RelayoutLogThresholdMs() {
     return kValue;
 }
 
-// ---- 表单控件识别（点击定位与 Tab 换焦点共用同一套判断）----
-// 命中测试给出的节点不一定就是元素本身：自绘控件的文字是 run，其 run.node
-// 可能挂在控件的文本子节点上，所以要向上找到最近的控件元素。
+
+
+
 bool IsFormControlTag(const Node* n) {
     return n && n->type == NodeType::Element &&
            (n->tag == "input" || n->tag == "textarea" || n->tag == "select" ||
@@ -1133,7 +1133,7 @@ Node* NearestControl(Node* n) {
     return nullptr;
 }
 
-// 文本类控件：键盘输入与退格只对它们生效（select / checkbox / 按钮不吃字符）。
+
 bool IsTextControl(const Node* n) {
     if (!n || n->type != NodeType::Element) return false;
     if (n->tag == "textarea") return true;
@@ -1143,7 +1143,7 @@ bool IsTextControl(const Node* n) {
              t == "checkbox" || t == "radio" || t == "hidden" || t == "file");
 }
 
-// 可被 Tab 选中的控件：与浏览器一致地跳过 hidden / reset / button / file。
+
 bool IsFocusableControl(const Node* n) {
     if (!n || n->type != NodeType::Element) return false;
     if (n->tag == "textarea" || n->tag == "select" || n->tag == "button") {
@@ -1154,7 +1154,7 @@ bool IsFocusableControl(const Node* n) {
     return !(t == "hidden" || t == "reset" || t == "button" || t == "file");
 }
 
-// 点它（或在它上面回车）会提交所属表单。
+
 bool IsSubmitControl(const Node* n) {
     if (!n || n->type != NodeType::Element) return false;
     std::string t = Lower(n->Attr("type"));
@@ -1163,26 +1163,26 @@ bool IsSubmitControl(const Node* n) {
     return false;
 }
 
-// 按 DOM 顺序收集整棵文档里的可聚焦控件。
+
 void CollectFocusable(const Node* n, std::vector<Node*>* out) {
     if (!n || !out) return;
     if (IsFocusableControl(n)) {
         out->push_back(const_cast<Node*>(n));
-        // <button> 的子节点只是标签文本，没有可聚焦内容，不必再往下走。
+        
         return;
     }
     for (const auto& c : n->children) CollectFocusable(c.get(), out);
 }
 
-// 收集布局树里所有 <video> 盒子，供诊断输出精确坐标。
+
 void CollectVideoBoxes(const Box* box, std::vector<const Box*>* out) {
     if (!box || !out) return;
     if (box->node && box->node->tag == "video") out->push_back(box);
     for (const auto& c : box->children) CollectVideoBoxes(c.get(), out);
 }
 
-// 转储布局树：同时给出“文档坐标”和渲染器实际使用的“屏幕坐标”。
-// fixed 子树使用视口局部坐标，转储时也照此处理，避免误判。
+
+
 void DumpBoxTree(const Box* box, const Rect& viewport, int scroll, int depth,
                  bool fixed_ctx = false) {
     if (!box || depth > 12) return;
@@ -1210,7 +1210,7 @@ void DumpBoxTree(const Box* box, const Rect& viewport, int scroll, int depth,
         DumpBoxTree(c.get(), viewport, scroll, depth + 1, is_fixed);
 }
 
-}  // namespace
+}  
 
 void BrowserApp::LogMediaState(const char* tag) const {
     if (active_ < 0 || active_ >= (int)tabs_.size()) return;
@@ -1224,7 +1224,7 @@ void BrowserApp::LogMediaState(const char* tag) const {
     CollectVideoBoxes(tab.page.RootBox(), &videos);
     for (size_t i = 0; i < videos.size(); ++i) {
         const Box& b = *videos[i];
-        // 同时给出“文档坐标”和“窗口坐标”，方便直接算点击位置。
+        
         std::printf(
             "  videoBox[%zu] doc=%d,%d,%d,%d screen=%d,%d,%d,%d "
             "controls_y_from=%d\n",
@@ -1253,7 +1253,7 @@ void BrowserApp::LogMediaState(const char* tag) const {
 }
 
 bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
-    // 语言要在建窗口/导航之前定下来：内置页第一次生成就会用到它。
+    
     if (!opt.set_lang.empty()) {
         MutableSettings().lang = ParseLang(opt.set_lang, CurrentSettings().lang);
     }
@@ -1272,8 +1272,8 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         std::printf("HeadlessShot: 创建隐藏窗口失败\n");
         return false;
     }
-    // 隐藏窗口可能收不到 WM_SIZE（尺寸未变化时系统不会重发），这里显式设定
-    // 视口尺寸，保证布局、命中测试和点击模拟都在确定的状态下进行。
+    
+    
     OnSize(opt.width, opt.height);
 
     HDC mem = CreateCompatibleDC(nullptr);
@@ -1307,7 +1307,7 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         PumpMessages(50);
     }
 
-    // 地址栏输入回归：先（可选）设置内容，再（可选）聚焦，最后逐字符走 OnChar。
+    
     if (!opt.set_address.empty() || opt.focus_address) {
         if (!opt.set_address.empty()) {
             address_text_ = opt.set_address;
@@ -1351,16 +1351,16 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         PumpMessages(100);
     }
 
-    // 地址栏剪贴板回归：--clipboard 先把文本写进系统剪贴板，之后全部走真实的
-    // OnKeyEx 路径（无窗口会话里没有键盘，GetKeyState 恒为 0，所以必须显式传
-    // 修饰键，否则测的就不是用户真正按下的那条分支）。
+    
+    
+    
     if (!opt.clipboard.empty() || opt.paste > 0 || opt.select_all || opt.copy ||
         opt.cut) {
         address_focused_ = true;
         if (!opt.clipboard.empty()) {
             bool ok = WriteClipboardText(hwnd_, opt.clipboard);
-            // 带上 GetLastError：OpenClipboard 被别的进程占用时会直接失败，
-            // 只打 ok=0 没法定位（实测踩到过 ok=0 但不知道为什么）。
+            
+            
             std::printf("[address] clipboard-set bytes=%zu ok=%d err=%lu\n",
                         opt.clipboard.size(), ok ? 1 : 0,
                         ok ? 0UL : (unsigned long)GetLastError());
@@ -1391,7 +1391,7 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         PumpMessages(100);
     }
 
-    // 快捷键回归：--hotkey 走与真实按键完全相同的 OnKeyEx 分支。
+    
     for (const std::string& hk : opt.hotkeys) {
         bool ctrl = hk.rfind("ctrl+", 0) == 0;
         std::string k = ctrl ? hk.substr(5) : hk;
@@ -1419,8 +1419,8 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         PumpMessages(50);
     }
 
-    // 先截图，再投递点击，最后 dump 布局树 —— dump 要反映"点击之后"的最终状态，
-    // 否则用 --click 验证事件处理器时看到的永远是点击前的内容。
+    
+    
     auto shoot = [&](const std::string& path) -> bool {
         canvas.FillRect(0, 0, opt.width, opt.height, 0xf1f5f9);
         Render(canvas);
@@ -1452,8 +1452,8 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
                 continue;
             }
             if (act.kind == ShotOptions::Action::Kind::TypeField) {
-                // 逐字符走真实的 OnChar 路径：焦点在地址栏还是页面控件上，
-                // 决定了这段文本最后落进哪个输入框，正是要验的东西。
+                
+                
                 int typed = 0;
                 for (size_t i = 0; i < act.text.size();) {
                     unsigned char c = (unsigned char)act.text[i];
@@ -1472,8 +1472,8 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
                 PumpMessages(120);
                 continue;
             }
-            // Press：命名键走真实 OnKeyEx 路径（无窗口会话没有键盘，
-            // 修饰键必须显式传，所以 shift+tab 这样写）。
+            
+            
             std::string k = Lower(act.text);
             bool shift = StartsWith(k, "shift+");
             if (shift) k = k.substr(6);
@@ -1509,8 +1509,8 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         std::printf("== 布局树（点击之后）==\n");
         DumpBoxTree(tab.page.RootBox(), page_view_, tab.scroll, 0);
         if (tab.page.Js()) {
-            // 标签用英文：--shot 的诊断输出一律英文键名（与 [address] typed=… 一致），
-            // 只有脚本名与异常文本是中文内容。README 里引用的就是这一行。
+            
+            
             std::printf("[js] scripts=%d failed=%d listeners=%zu timers=%d\n",
                         tab.page.JsScriptCount(), tab.page.JsScriptFailures(),
                         tab.page.Js()->ListenerCount(),
@@ -1584,8 +1584,8 @@ LRESULT BrowserApp::WndProc(UINT msg, WPARAM w, LPARAM l) {
         case WM_MOUSEWHEEL:
             OnMouseWheel(GET_WHEEL_DELTA_WPARAM(w));
             return 0;
-        // 外部工具（输入法、无障碍程序）通过这三条消息驱动编辑框，
-        // 我们不是 EDIT 控件，必须自己接，否则粘贴对它们等于没实现。
+        
+        
         case WM_PASTE:
             if (address_focused_) {
                 AddressPasteFromClipboard();
@@ -1680,7 +1680,7 @@ void BrowserApp::RenderTabs(Canvas& canvas) {
         const TabState& tab = tabs_[i];
         std::string label =
             tab.title.empty() ? std::string(T("page.untitled")) : tab.title;
-        // 标题要裁在关闭按钮左侧，否则长标题会压住 × 甚至溢出标签外。
+        
         const int kTabFont = 13;
         int max_w = std::max(12, r.w - 9 - 26);
         label = EllipsizeText(canvas, label, kTabFont, active, max_w);
@@ -1706,43 +1706,43 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     canvas.FillRect(0, 38, width_, 40, 0xf8fafc);
     canvas.StrokeLine(0, 77, width_, 77, 0xe2e8f0);
 
-    // Back.
+    
     Rect back{8, 44, 30, 28};
     canvas.FillRoundRect(back.x, back.y, back.w, back.h, 6, 0xeef2f7);
     canvas.StrokeLine(back.x + 20, back.y + 8, back.x + 11, back.y + 14, 0x334155, 2);
     canvas.StrokeLine(back.x + 11, back.y + 14, back.x + 20, back.y + 20, 0x334155, 2);
 
-    // Forward.
+    
     Rect fwd{40, 44, 30, 28};
     canvas.FillRoundRect(fwd.x, fwd.y, fwd.w, fwd.h, 6, 0xeef2f7);
     canvas.StrokeLine(fwd.x + 10, fwd.y + 8, fwd.x + 19, fwd.y + 14, 0x334155, 2);
     canvas.StrokeLine(fwd.x + 19, fwd.y + 14, fwd.x + 10, fwd.y + 20, 0x334155, 2);
 
-    // Reload：留缺口的圆环 + 箭头。
-    // 注意 Rect 是 {x, y, w, h}：之前按 {left,top,right,bottom} 传，
-    // w/h 变成 94/67，画出一个横跨到地址栏的巨型椭圆。
+    
+    
+    
     Rect reload{72, 44, 30, 28};
     canvas.FillRoundRect(reload.x, reload.y, reload.w, reload.h, 6, 0xeef2f7);
     const double kPi = 3.14159265358979323846;
     int rcx = reload.x + reload.w / 2;
     int rcy = reload.y + reload.h / 2;
     int rr = 7;
-    int arc_start = 60;   // 缺口留在右上角
-    int arc_sweep = 270;  // 逆时针扫 270°
+    int arc_start = 60;   
+    int arc_sweep = 270;  
     canvas.StrokeArc({rcx - rr, rcy - rr, rr * 2, rr * 2}, arc_start,
                      arc_sweep, 0x334155, 2);
-    // 箭头落在弧的起点上，方向取该点的切线，画成一个小 V 形箭头
+    
     double a0 = arc_start * kPi / 180.0;
     int tip_x = rcx + (int)std::lround(rr * std::cos(a0));
     int tip_y = rcy - (int)std::lround(rr * std::sin(a0));
     for (int sign = -1; sign <= 1; sign += 2) {
-        double ba = a0 + kPi / 2 + sign * 0.45;  // 切线方向 ±26°
+        double ba = a0 + kPi / 2 + sign * 0.45;  
         int bx = (int)std::lround(std::cos(ba) * 5.5);
         int by = -(int)std::lround(std::sin(ba) * 5.5);
         canvas.StrokeLine(tip_x, tip_y, tip_x - bx, tip_y - by, 0x334155, 2);
     }
 
-    // Home.
+    
     Rect home{104, 44, 30, 28};
     canvas.FillRoundRect(home.x, home.y, home.w, home.h, 6, 0xeef2f7);
     canvas.StrokeLine(home.x + 6, home.y + 15, home.x + 15, home.y + 7, 0x334155, 2);
@@ -1751,7 +1751,7 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     canvas.StrokeLine(home.x + 22, home.y + 13, home.x + 22, home.y + 22, 0x334155, 2);
     canvas.StrokeLine(home.x + 8, home.y + 22, home.x + 22, home.y + 22, 0x334155, 2);
 
-    // Settings：齿轮（外圈 + 8 个齿 + 内孔）。
+    
     Rect gear{kSettingsX, 44, 30, 28};
     canvas.FillRoundRect(gear.x, gear.y, gear.w, gear.h, 6, 0xeef2f7);
     int gcx = gear.x + gear.w / 2;
@@ -1771,21 +1771,21 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     canvas.StrokeArc({gcx - g_inner, gcy - g_inner, g_inner * 2, g_inner * 2}, 0,
                      360, 0x334155, 2);
 
-    // Address bar.
-    // 几何一律取文件开头的 kAddr* 常量：原来这里写死了 140/44/30 并重新定义了
-    // kAddrFont/kAddrPadX，改一处忘一处就会出现「看到的位置点不中」。
+    
+    
+    
     Rect addr{kAddrX, kToolbarY, std::max(1, width_ - kAddrX - 8), kAddrH};
     uint32_t border = address_focused_ ? 0x2563eb : 0xcbd5e1;
     canvas.FillRoundRect(addr.x, addr.y, addr.w, addr.h, 7, 0xffffff);
     canvas.StrokeRect(addr.x, addr.y, addr.w, addr.h, border);
 
-    // URL 文字：垂直居中，并裁剪在框内（长 URL 不能溢出到工具栏外）。
-    // 之前写成固定 addr.y + 8，字号 15 时文字底部正好压在/穿过下边框。
+    
+    
     int text_h = canvas.TextHeight(kAddrFont);
     int text_y = addr.y + std::max(2, (addr.h - text_h) / 2 + 1);
     std::string shown = address_text_;
     canvas.Clip(Rect{addr.x + 1, addr.y + 1, addr.w - 2, addr.h - 2});
-    // 选择区高亮画在文字之下：只测量前缀宽度，与 AddressCaretFromX 同源。
+    
     if (address_focused_ && AddressHasSelection()) {
         size_t b = std::min(AddressSelBegin(), shown.size());
         size_t e = std::min(AddressSelEnd(), shown.size());
@@ -1896,7 +1896,7 @@ void BrowserApp::OnLButtonDown(int x, int y) {
         active_ = hit.index;
         address_focused_ = false;
         SyncAddress();
-        // 切标签只换当前页，页面内容没变 —— 视口尺寸也没变，布局直接复用。
+        
         EnsureLayoutActive();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
@@ -1957,8 +1957,8 @@ void BrowserApp::OnLButtonDown(int x, int y) {
         address_focused_ = true;
         int clicked = (int)AddressCaretFromX(x);
         if (!was_focused) {
-            // 点进地址栏＝全选（与系统地址栏一致）。真正的拖动会在
-            // OnMouseMove 里用 drag_anchor_ 重新起一段选择。
+            
+            
             AddressSelectAll();
             drag_anchor_ = clicked;
         } else {
@@ -1975,11 +1975,11 @@ void BrowserApp::OnLButtonDown(int x, int y) {
     }
     if (hit.area == HitArea::Page) {
         address_focused_ = false;
-        // 点页面＝放弃地址栏里没提交的内容，必须同步回真实地址，
-        // 否则地址栏会一直显示用户敲了一半却没导航的文本。
+        
+        
         AddressClearSelection();
         SyncAddress();
-        // 点击到输入控件就把键盘焦点给它（表单与地址栏互斥）
+        
         Node* clicked_submit = nullptr;
         if (active_ >= 0 && active_ < (int)tabs_.size()) {
             TabState& ft = tabs_[active_];
@@ -1987,11 +1987,11 @@ void BrowserApp::OnLButtonDown(int x, int y) {
                                             y - page_view_.y + ft.scroll);
             Node* fld = NearestControl(const_cast<Node*>(hn));
             FocusField(fld, x - page_view_.x);
-            // 点到提交按钮就提交（回车提交走 OnKeyEx 那条分支）。
+            
             if (IsSubmitControl(fld)) clicked_submit = fld;
         }
-        // 先把点击交给页面脚本：处理器可能 preventDefault 掉默认动作
-        // （比如 <a onclick="return false">），也可能自己发起导航。
+        
+        
         if (active_ >= 0 && active_ < (int)tabs_.size()) {
             TabState& t = tabs_[active_];
             int jx = x - page_view_.x;
@@ -2013,7 +2013,7 @@ void BrowserApp::OnLButtonDown(int x, int y) {
                 if (js_dirty) InvalidateRect(hwnd_, nullptr, FALSE);
             }
         }
-        // 页面脚本没有接管这次点击，才轮到表单的默认动作：提交按钮按下即提交。
+        
         if (clicked_submit) {
             LogFieldState("click-submit");
             SubmitFieldForm(clicked_submit, clicked_submit);
@@ -2063,7 +2063,7 @@ void BrowserApp::OnLButtonDblClk(int x, int y) {
     if (HitTestPoint(x, y).area != HitArea::Address) return;
     address_focused_ = true;
     AddressSelectAll();
-    // 双击之后还常常接着拖：把拖选起点固定到行首。
+    
     drag_anchor_ = 0;
     drag_down_x_ = x;
     mouse_selecting_ = false;
@@ -2075,8 +2075,8 @@ void BrowserApp::OnMouseMove(int x, int y, bool dragging) {
     (void)y;
     if (!mouse_selecting_ || !dragging || !address_focused_) return;
     if (drag_anchor_ < 0) return;
-    // 单击也会走到这里：只有真的横向移动了才把「点进即全选」换成拖动选择，
-    // 否则普通点击会立刻把全选清掉。
+    
+    
     if (x == drag_down_x_) return;
     sel_anchor_ = drag_anchor_;
     caret_ = (int)AddressCaretFromX(x);
@@ -2090,7 +2090,7 @@ void BrowserApp::OnRButtonUp(int x, int y) {
     if (caret_ < 0 || (size_t)caret_ > address_text_.size()) {
         caret_ = (int)address_text_.size();
     }
-    // 右键落在选择区之外时先清掉选择区，避免「剪切」剪掉看不见的内容。
+    
     if (AddressHasSelection()) {
         size_t at = AddressCaretFromX(x);
         if (at < AddressSelBegin() || at > AddressSelEnd()) {
@@ -2111,10 +2111,10 @@ void BrowserApp::OnMouseWheel(int delta) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-// ---- 地址栏选择区与剪贴板 ------------------------------------------------
-// 选择区与插入点都用「字节下标 + 码点边界」表示：sel_anchor_ 是固定端，
-// caret_ 是活动端，两者相等即无选择。Shift+方向键、拖动选择、双击全选
-// 共用这一套状态，不需要额外的 has_selection 标志去同步。
+
+
+
+
 bool BrowserApp::AddressHasSelection() const {
     if (sel_anchor_ < 0) return false;
     int c = std::max(0, caret_);
@@ -2163,8 +2163,8 @@ void BrowserApp::AddressDeleteSelection() {
     caret_visible_ = true;
 }
 
-// 在插入点插入文本：先删选择区（输入与粘贴都会替换选中内容），
-// 再把插入点吸附到码点边界，最后推进插入点。
+
+
 void BrowserApp::AddressInsert(const std::string& utf8) {
     if (utf8.empty()) return;
     AddressDeleteSelection();
@@ -2176,7 +2176,7 @@ void BrowserApp::AddressInsert(const std::string& utf8) {
     caret_visible_ = true;
 }
 
-// 复制：没有选择区时复制整条地址（地址栏最常见的诉求就是「把网址拷走」）。
+
 void BrowserApp::AddressCopyToClipboard() {
     std::string text = AddressHasSelection() ? AddressSelectedText() : address_text_;
     if (text.empty()) return;
@@ -2210,9 +2210,9 @@ void BrowserApp::AddressPasteFromClipboard() {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-// 按 x 像素位置算插入点下标。基准与绘制同源（kAddrX + kAddrPadX），
-// 逐码点比较前缀宽度取最近的一个。原来这段逻辑埋在 OnLButtonDown 里，
-// 拖动选择要用同一套算法，抽出来共用，避免两处实现漂移。
+
+
+
 size_t BrowserApp::AddressCaretFromX(int x) const {
     if (!measure_canvas_) return 0;
     int rel = x - (kAddrX + kAddrPadX);
@@ -2242,7 +2242,7 @@ void BrowserApp::ShowAddressMenu(int x, int y) {
     const std::string sel = AddressSelectedText();
     const bool has_text = !sel.empty();
     const bool has_clip = ClipboardHasText();
-    // 菜单文案走界面字符串表：T() 给的是 UTF-8，菜单 API 要 UTF-16。
+    
     AppendMenuW(menu, MF_STRING | (has_text ? 0 : MF_GRAYED), kMenuCut,
                 Utf8ToWide(T("menu.cut")).c_str());
     AppendMenuW(menu,
@@ -2254,7 +2254,7 @@ void BrowserApp::ShowAddressMenu(int x, int y) {
     AppendMenuW(menu, MF_STRING | (address_text_.empty() ? MF_GRAYED : 0),
                 kMenuSelectAll, Utf8ToWide(T("menu.selectAll")).c_str());
     SetMenuDefaultItem(menu, kMenuPaste, FALSE);
-    // TPM_RETURNCMD：把命令号当返回值拿，省掉 WM_COMMAND 分发。
+    
     UINT cmd = (UINT)TrackPopupMenu(
         menu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0,
         hwnd_, nullptr);
@@ -2284,11 +2284,11 @@ void BrowserApp::OnKey(UINT key) {
 }
 
 void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
-    // 全局快捷键必须放在最前面：原来地址栏一聚焦，整个函数就走进了
-    // 「地址栏分支」并在末尾 return，F5 / Ctrl+R / Ctrl+L 全部失灵。
+    
+    
     if (key == VK_F5 || (ctrl && key == 'R')) {
-        // 重载不能让地址栏里正在编辑的内容丢掉：NavigateTo 会主动失焦并把
-        // 地址同步回当前 URL，所以这里先存后还原（与系统浏览器一致）。
+        
+        
         bool keep_focus = address_focused_;
         std::string keep_text = address_text_;
         int keep_caret = caret_;
@@ -2309,13 +2309,13 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
-    // Tab / Shift+Tab 在页面控件之间换焦点。放在表单分支之前：焦点还没落到
-    // 任何控件上时，第一次 Tab 应该选中页面里的第一个控件（与浏览器一致）。
+    
+    
     if (key == VK_TAB && !address_focused_ && !ctrl) {
         AdvanceFieldFocus(shift);
         return;
     }
-    // 表单焦点：编辑控件文本 / 回车提交 / Esc 取消焦点
+    
     if (!address_focused_ && active_ >= 0 && active_ < (int)tabs_.size() &&
         tabs_[active_].field_focused && tabs_[active_].field) {
         TabState& tab = tabs_[active_];
@@ -2324,7 +2324,7 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
         if (fc > cur.size()) fc = cur.size();
         fc = Utf8SnapToBoundary(cur, fc);
         if (key == VK_RETURN) {
-            // 焦点在提交按钮上时回车等价于按下它（按钮的 name=value 要带上）。
+            
             SubmitFieldForm(tab.field,
                             IsSubmitControl(tab.field) ? tab.field : nullptr);
             return;
@@ -2334,7 +2334,7 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
             InvalidateRect(hwnd_, nullptr, FALSE);
             return;
         }
-        // 剩下的都是文本编辑键：只有文本类控件吃它们。
+        
         if (!IsTextControl(tab.field)) return;
         if (key == VK_BACK) {
             if (fc > 0) {
@@ -2383,15 +2383,15 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
     caret = Utf8SnapToBoundary(address_text_, caret);
 
     if (key == VK_RETURN) {
-        // 空地址栏按回车：原来会 NavigateTo("")，把空串当地址去解析。
-        // 这里按「什么都没输入」处理，只退出编辑状态。
+        
+        
         std::string typed = address_text_;
         if (!typed.empty()) NavigateTo(typed, true);
         address_focused_ = false;
         AddressClearSelection();
-        // 这里刻意不调用 SyncAddress：它会用"当前已加载的地址"覆盖地址栏，
-        // 而那要等加载完成才更新 —— 用户看到的表现就是"输入后地址栏没变"。
-        // NavigateTo 已经把地址栏设成目标地址（pending_url），保持它。
+        
+        
+        
         caret_ = (int)address_text_.size();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
@@ -2399,11 +2399,11 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
     if (key == VK_ESCAPE) {
         address_focused_ = false;
         AddressClearSelection();
-        SyncAddress();  // 顺带把插入点复位
+        SyncAddress();  
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
-    // 剪贴板快捷键：除 Ctrl+C/X/V 外，也支持 Windows 传统组合键。
+    
     if ((ctrl && key == 'C') || (ctrl && key == VK_INSERT)) {
         AddressCopyToClipboard();
         return;
@@ -2422,8 +2422,8 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
         return;
     }
     if (key == VK_BACK) {
-        // 有选择区先删选择区（与所有编辑框一致）；否则按 UTF-8 码点退一格，
-        // 只删一个字节会把汉字切成半个（非法 UTF-8）。
+        
+        
         if (AddressHasSelection()) {
             AddressDeleteSelection();
         } else if (caret > 0) {
@@ -2442,7 +2442,7 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
             size_t next = Utf8NextIndex(address_text_, caret);
             address_text_.erase(caret, next - caret);
         }
-        // 原来这条分支漏了 caret_visible_：光标会一直停在上次闪烁的隐藏态。
+        
         caret_visible_ = true;
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
@@ -2450,7 +2450,7 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
     if (key == VK_LEFT || key == VK_RIGHT) {
         bool left = (key == VK_LEFT);
         if (!shift && AddressHasSelection()) {
-            // 无 Shift 时先塌缩到选择区边缘（与系统编辑框一致）。
+            
             caret_ = (int)(left ? AddressSelBegin() : AddressSelEnd());
             AddressClearSelection();
         } else if (left ? (caret > 0) : (caret < address_text_.size())) {
@@ -2474,7 +2474,7 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
 
 void BrowserApp::OnChar(wchar_t ch) {
     if (ch < 32) return;
-    // 表单输入：写进控件的值再重新布局，控件文字就会跟着变
+    
     if (!address_focused_ && active_ >= 0 && active_ < (int)tabs_.size()) {
         TabState& tab = tabs_[active_];
         if (tab.field_focused && tab.field && IsTextControl(tab.field)) {
@@ -2492,13 +2492,13 @@ void BrowserApp::OnChar(wchar_t ch) {
         }
     }
     if (!address_focused_) return;
-    // 走 AddressInsert：有选择区时先替换掉，插入点与边界处理只有一处实现。
+    
     AddressInsert(WideToUtf8(std::wstring(1, ch)));
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
-// JS 定时器心跳：setTimeout / setInterval / requestAnimationFrame 在这里执行。
-// 页面没有脚本时只做一次判断就返回，因此 60ms 一跳的开销可以忽略。
+
+
 void BrowserApp::OnJsTick() {
     if (active_ < 0 || active_ >= (int)tabs_.size()) return;
     TabState& tab = tabs_[active_];
@@ -2565,7 +2565,7 @@ std::string BrowserApp::FieldText(const Node* n) const {
 void BrowserApp::SetFieldText(Node* n, const std::string& v) {
     if (!n) return;
     if (n->tag == "textarea") {
-        // textarea 的值是它的文本子节点（布局按文本渲染）
+        
         n->children.clear();
         Node* t = MakeText(v);
         t->parent = n;
@@ -2576,15 +2576,15 @@ void BrowserApp::SetFieldText(Node* n, const std::string& v) {
 }
 
 void BrowserApp::FocusField(Node* n, int click_x) {
-    // click_x 目前不参与定位：控件内部的精确插入点要按控件盒里的文字度量来算，
-    // 现在一律把插入点放在文本末尾，用户可以用 Home/End/左右键再调整。
+    
+    
     (void)click_x;
     TabState& tab = ActiveTab();
     tab.field = n;
     tab.field_focused = (n != nullptr);
     tab.field_caret = (int)FieldText(n).size();
     if (n) {
-        address_focused_ = false;  // 表单与地址栏互斥
+        address_focused_ = false;  
         AddressClearSelection();
     }
 }
@@ -2611,8 +2611,8 @@ bool BrowserApp::SubmitFieldForm(Node* field, Node* activated) {
     while (!stack.empty()) {
         const Node* n = stack.back();
         stack.pop_back();
-        // 子节点逆序入栈，弹出时才是文档顺序 —— 栈是后进先出，顺序反了会
-        // 让表单字段按倒序编码，服务端拿到的字段顺序与 HTML 规范不符。
+        
+        
         for (auto it = n->children.rbegin(); it != n->children.rend(); ++it) {
             stack.push_back(it->get());
         }
@@ -2623,18 +2623,18 @@ bool BrowserApp::SubmitFieldForm(Node* field, Node* activated) {
         std::string name = n->Attr("name");
         if (name.empty()) continue;
         std::string type = Lower(n->Attr("type"));
-        // 按钮类控件本身不进表单数据：只有"被按下的那一个"按规范补在最后。
+        
         if (n->tag == "input" &&
             (type == "submit" || type == "button" || type == "image" ||
              type == "reset" || type == "file")) {
             continue;
         }
-        // 未勾选的 checkbox / 未选中的 radio 不提交。
+        
         if ((type == "checkbox" || type == "radio") && !n->HasAttr("checked")) {
             continue;
         }
         std::string value = FieldText(n);
-        // 勾上了但没写 value 的 checkbox/radio，按规范提交 "on"。
+        
         if ((type == "checkbox" || type == "radio") && value.empty()) {
             value = "on";
         }
@@ -2642,7 +2642,7 @@ bool BrowserApp::SubmitFieldForm(Node* field, Node* activated) {
         body += FormEncode(name) + "=" + FormEncode(value);
         fields++;
     }
-    // 被按下/被回车激活的提交按钮：只有带 name 才进表单数据。
+    
     if (activated) {
         std::string an = activated->Attr("name");
         if (!an.empty()) {
@@ -2652,7 +2652,7 @@ bool BrowserApp::SubmitFieldForm(Node* field, Node* activated) {
         }
     }
 
-    // 隐藏域（CSRF token 这类）也算字段，提交前必须能在日志里看见。
+    
     LogStartup("[form] submit method=" + method + " fields=" +
                std::to_string(fields) + " bytes=" +
                std::to_string(body.size()) + " action=" + url);
@@ -2669,8 +2669,8 @@ bool BrowserApp::SubmitFieldForm(Node* field, Node* activated) {
     return true;
 }
 
-// Tab / Shift+Tab：按 DOM 顺序在可聚焦控件之间移动焦点。
-// 焦点还没落在控件上时，正向 Tab 选第一个、反向 Shift+Tab 选最后一个。
+
+
 bool BrowserApp::AdvanceFieldFocus(bool backward) {
     if (active_ < 0 || active_ >= (int)tabs_.size()) return false;
     TabState& tab = tabs_[active_];
@@ -2699,7 +2699,7 @@ bool BrowserApp::AdvanceFieldFocus(bool backward) {
     return true;
 }
 
-// 把页面表单焦点的状态打成一行：--shot 的表单回归靠这一行取证。
+
 void BrowserApp::LogFieldState(const char* tag) const {
     if (active_ < 0 || active_ >= (int)tabs_.size()) return;
     const TabState& tab = tabs_[active_];
@@ -2722,8 +2722,8 @@ std::string BrowserApp::DisplayUrl() const {
 void BrowserApp::SyncAddress() {
     if (!address_focused_) {
         address_text_ = DisplayUrl();
-        // 失焦后插入点与选择区必须一起复位：否则下次聚焦会带着一个指向
-        // 旧文本的选择区（下标可能已经越界），一粘贴就写到错误位置。
+        
+        
         caret_ = (int)address_text_.size();
         AddressClearSelection();
     }
@@ -2737,16 +2737,16 @@ void BrowserApp::EnsureLayoutActive() {
     EnsureLayout(active_);
 }
 
-// 需要时才重排：视口尺寸和上次布局时一样，就把上次的布局结果直接拿来用。
-//
-// 原来的切标签路径无条件调用 RelayoutActive()，于是每次点标签都整页重排一遍 ——
-// 实测切到某评测站首页（文档高 5914、约 10k 个 run）单次要 1955~1976ms，
-// 用户感觉就是"卡一下"。而视口尺寸一次都没变，布局结果本来就可以复用。
-//
-// 为什么可以只比视口尺寸、不需要额外的"脏"标记：
-// 所有会改变页面内容的路径（导航完成、资源到齐、脚本改 DOM、表单输入）
-// 都在改完之后强制走过 RelayoutTab，而 RelayoutTab 会把视口尺寸记下来。
-// 所以只要视口没变，缓存就是最新的。
+
+
+
+
+
+
+
+
+
+
 bool BrowserApp::EnsureLayout(int index) {
     if (index < 0 || index >= (int)tabs_.size()) return false;
     if (page_view_.w <= 0) return false;
@@ -2770,29 +2770,29 @@ void BrowserApp::RelayoutTab(int index) {
     int max_scroll = std::max(0, tab.page.ContentHeight() - page_view_.h);
     tab.scroll = std::max(0, std::min(tab.scroll, max_scroll));
     if (ms >= RelayoutLogThresholdMs()) {
-        // 卡顿排查用：哪一页、什么视口、排了多久、文档多高。
+        
         std::printf("[perf] relayout tab=%d viewport=%dx%d ms=%.1f height=%d\n",
                     index, page_view_.w, page_view_.h, ms,
                     tab.page.ContentHeight());
     }
 }
 
-// 第二阶段：图片与外链脚本到手。补画一次并执行脚本。
+
 void BrowserApp::OnAssetsDone(LPARAM l) {
     NavResult* raw = reinterpret_cast<NavResult*>(l);
     if (!raw) return;
     int idx = raw->tab_index;
     if (idx >= 0 && idx < (int)tabs_.size()) {
         TabState& tab = tabs_[idx];
-        // 只在这一页仍是当前已加载页面时应用：用户可能已经导航到别处了。
+        
         if (!raw->final_url.empty() && tab.url == raw->final_url) {
             tab.page.SetImages(raw->images);
             tab.page.SetExternalScripts(raw->scripts);
             LogNavTiming(*raw);
-            // 这一阶段「有没有真的改变布局」要判断一下再决定是否重排。
-            // 原来是无条件 RelayoutTab：像某评测站那种首页，导航时会在
-            // HTML 到手和资源到手各排一次，单次约 2 秒，等于白冻一次。
-            // 图片会改尺寸、脚本可能改 DOM —— 这两件都没发生时不必重排。
+            
+            
+            
+            
             bool images_attached = !raw->images.empty();
             bool scripts_dirty = tab.page.RunScripts();
             if (images_attached || scripts_dirty) {
@@ -2840,8 +2840,8 @@ void BrowserApp::FinishNavigate(int tab_index, int seq,
     tab.page.SetImages(images);
     tab.page.SetExternalScripts(scripts);
     RelayoutTab(tab_index);
-    // 脚本不在这里执行：外链脚本属于第二阶段资源，等它到手再统一执行
-    // （见 OnAssetsDone），否则内联脚本会先跑一遍、外链脚本永远没机会跑。
+    
+    
     tab.scroll = 0;
     tab.title = tab.page.Data().title;
     if (tab.title.empty()) tab.title = resolved;
@@ -2868,7 +2868,7 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
     int tab_index = active_;
     int seq = ++nav_seq_;
     std::string target = NormalizeUrlInput(url);
-    // 内置页的查询串在这里落地（改设置、落盘），必须在起导航线程之前。
+    
     ApplyBuiltinQuery(target);
     TabState& tab = tabs_[tab_index];
     tab.pending_seq = seq;
@@ -2897,9 +2897,9 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
         std::string res_base = final_url.empty() ? target : final_url;
         double ms_html = (double)(t1 - t0);
 
-        // 阶段一：HTML 到手就交给 UI 解析并绘制。
-        // 实测某真实站点首页：HTML 1.4s、图片 6.6s。原来等图片齐了才画，
-        // 用户要盯 8 秒白屏；现在页面先出来，图片随后补。
+        
+        
+        
         NavResult* first = new NavResult();
         first->tab_index = tab_index;
         first->seq = seq;
@@ -2913,7 +2913,7 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
             delete first;
         }
 
-        // 阶段二：图片与外链脚本继续在导航线程取，取完补画一次并执行脚本。
+        
         NavResult* second = new NavResult();
         second->assets_phase = true;
         second->tab_index = tab_index;
@@ -2941,4 +2941,4 @@ void BrowserApp::NavigateTo(const std::string& url, bool add_history) {
     StartNavigate(url, add_history);
 }
 
-}  // namespace zb
+}  

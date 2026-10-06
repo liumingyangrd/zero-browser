@@ -12,8 +12,8 @@ namespace zb {
 struct TextRun {
     std::string text;
     Rect rect;
-    // 这个 run 属于哪个 DOM 节点（文本节点或控件所在的元素）。
-    // 命中测试要按 run 反查节点才能把点击派发给 <button> 之类自绘控件。
+    
+    
     Node* node = nullptr;
     std::string color;
     int font_size = 16;
@@ -22,13 +22,13 @@ struct TextRun {
     bool underline = false;
     bool link = false;
     std::string href;
-    // 图片替换元素：非空时绘制 image 到 rect，text 忽略。
+    
     std::shared_ptr<Image> image;
-    // 图片加载失败也保留占位大小，绘制成灰底边框的“破图”块。
+    
     bool image_missing = false;
-    // 破图占位里显示的替代文本（来自 <img alt>）。
+    
     std::string alt_text;
-    // 表单控件：空串表示普通文本/图片；否则为 input/button/select/textarea。
+    
     std::string widget;
     std::string widget_value;
     bool widget_focused = false;
@@ -37,7 +37,7 @@ struct TextRun {
 struct LinkArea {
     Rect rect;
     std::string href;
-    bool fixed = false;  // fixed 定位子树，命中时不应加滚动偏移
+    bool fixed = false;  
 };
 
 struct Box {
@@ -51,7 +51,7 @@ struct Box {
     std::vector<LinkArea> links;
     int scroll_height = 0;
     bool hidden = false;
-    // fixed 定位：绘制与命中测试按视口局部坐标处理，不随页面滚动。
+    
     bool fixed = false;
 };
 
@@ -71,4 +71,4 @@ private:
     int viewport_h_ = 0;
 };
 
-}  // namespace zb
+}  

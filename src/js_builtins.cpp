@@ -1,11 +1,11 @@
-// 内置方法表：按接收者类型分派（代替原型链）。
-//
-// 约定：所有方法都以 self（this）为操作对象，因此
-//   "abc".toUpperCase()            走 String 表
-//   [1,2,3].map(fn)                走 Array 表
-//   Array.prototype.slice.call(x)  也能用 —— 因为 slice 读的是 this
-// 数组方法同时接受"类数组"（有 length 与数字下标），所以 arguments 这类对象
-// 也能直接喂进去。
+
+
+
+
+
+
+
+
 
 #include "js.h"
 
@@ -27,8 +27,8 @@ JsValue Arg(const Args& a, size_t i) {
     return i < a.size() ? a[i] : JsValue::Undef();
 }
 
-// 字符串下标吸附到码点边界：按字节切片会把汉字切成半个（非法 UTF-8），
-// 这类内容一旦写回 DOM 就会在绘制时出乱码。
+
+
 size_t SnapDown(const std::string& s, long long i) {
     if (i <= 0) return 0;
     if ((size_t)i >= s.size()) return s.size();
@@ -47,7 +47,7 @@ std::string SelfStr(Interp& it, const JsValue& self) {
     return it.ToString(self);
 }
 
-// 数组元素的统一读写：真数组与类数组都走 JsGetIndex/JsSetIndex。
+
 void SetLength(Interp& it, const JsValue& self, double n) {
     if (self.obj && self.obj->is_array) {
         self.obj->length = n;
@@ -60,7 +60,7 @@ double TypedInt(Interp& it, const JsValue& self) {
     return JsLengthOf(it, self);
 }
 
-// ------------------------------------------------------------- 字符串方法
+
 const JsMethodDef kStringMethods[] = {
     {"charAt",
      [](Interp& it, void*, const std::string&, const Args& a,
@@ -323,7 +323,7 @@ const JsMethodDef kStringMethods[] = {
          std::string s = SelfStr(it, self);
          long long n = ToInt(it, Arg(a, 0));
          if (n < 0) n = 0;
-         if (n > 4096) n = 4096;  // 防止 s.repeat(1e9) 直接把内存打爆
+         if (n > 4096) n = 4096;  
          std::string r;
          for (long long i = 0; i < n; ++i) r += s;
          *out = JsValue::Str(r);
@@ -372,7 +372,7 @@ const JsMethodDef kStringMethods[] = {
      }},
 };
 
-// --------------------------------------------------------------- 数组方法
+
 const JsMethodDef kArrayMethods[] = {
     {"push",
      [](Interp& it, void*, const std::string&, const Args& a,
@@ -739,7 +739,7 @@ const JsMethodDef kArrayMethods[] = {
      }},
 };
 
-// --------------------------------------------------------------- 数字方法
+
 const JsMethodDef kNumberMethods[] = {
     {"toFixed",
      [](Interp& it, void*, const std::string&, const Args& a,
@@ -789,7 +789,7 @@ const JsMethodDef kNumberMethods[] = {
      }},
 };
 
-// --------------------------------------------------------------- 对象方法
+
 const JsMethodDef kObjectMethods[] = {
     {"hasOwnProperty",
      [](Interp& it, void*, const std::string&, const Args& a,
@@ -825,7 +825,7 @@ const JsMethodDef kObjectMethods[] = {
      }},
 };
 
-// ------------------------------------------------------------- 函数方法
+
 const JsMethodDef kFunctionMethods[] = {
     {"call",
      [](Interp& it, void*, const std::string&, const Args& a,
@@ -855,7 +855,7 @@ const JsMethodDef kFunctionMethods[] = {
          JsValue thisArg = a.empty() ? JsValue::Undef() : a[0];
          std::vector<JsValue> bound;
          for (size_t i = 1; i < a.size(); ++i) bound.push_back(a[i]);
-         // 捕获 fn/thisArg/bound：NativeFn 是 std::function，可以带状态。
+         
          *out = it.MakeNative(
              "bound",
              [fn, thisArg, bound](Interp& in, void*, const std::string&,
@@ -870,7 +870,7 @@ const JsMethodDef kFunctionMethods[] = {
      }},
 };
 
-}  // namespace
+}  
 
 const JsMethodDef* JsStringMethods(size_t* count) {
     *count = sizeof(kStringMethods) / sizeof(kStringMethods[0]);
@@ -906,4 +906,4 @@ JsValue JsMethodTableObject(const JsMethodDef* defs, size_t n) {
     return JsValue::Obj(std::move(o));
 }
 
-}  // namespace zb
+}  

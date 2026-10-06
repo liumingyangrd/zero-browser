@@ -168,26 +168,26 @@ std::string Win32Error(const char* what) {
     return buf;
 }
 
-// --- Minimal browser-level cookie jar -------------------------------------
-// 真实站点（某评测站 / 某视频站）依赖登录 Cookie 跨请求保持状态。这里按 RFC 6265 的
-// 常用子集实现：host 匹配、路径前缀、Secure 与 HttpOnly、过期时间。
-// 只负责“哪些 Cookie 能发给哪个请求”，没有做同源策略以外的复杂校验。
+
+
+
+
 
 struct Cookie {
     std::string name;
     std::string value;
     std::string path = "/";
-    std::string host;       // 设置该 Cookie 的域名
+    std::string host;       
     bool secure = false;
     bool http_only = false;
-    long long expires = 0;  // 0 = session; >0 = Unix 时间戳
+    long long expires = 0;  
 };
 
 std::mutex g_cookie_mtx;
 std::vector<Cookie> g_cookies;
 
 std::string HostOf(const std::string& url) {
-    // 只识别 http(s)://host[:port]，端口不参与 Cookie 匹配。
+    
     size_t scheme = url.find("://");
     if (scheme == std::string::npos) return "";
     size_t start = scheme + 3;
@@ -335,10 +335,10 @@ void AbsorbSetCookies(const std::string& url,
     for (const auto& h : headers) AbsorbSetCookie(url, h);
 }
 
-}  // namespace
+}  
 
-// 每个线程复用一个 WinHTTP 会话。会话复用才能启用连接保活（keep-alive）与
-// TLS 会话缓存：否则每个图片/样式都要重新握手，真实站点几十个资源要几十秒。
+
+
 HINTERNET AcquireSession(DWORD access_type, const wchar_t* named_proxy,
                          int timeout_ms) {
     struct Cache {
@@ -458,7 +458,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     WinHttpAddRequestHeaders(request, headers, (DWORD)-1L,
                              WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
 
-    // 很多 CDN / 图床在缺少 Referer 时直接 403，子资源请求要带上来源页。
+    
     if (!referer.empty()) {
         std::wstring wref = U8ToW("Referer: " + referer + "\r\n");
         WinHttpAddRequestHeaders(request, wref.c_str(), (DWORD)-1L,
@@ -478,7 +478,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 
     BOOL sent = FALSE;
     if (!post_body.empty()) {
-        // 表单提交：Content-Type 由调用方给（默认 x-www-form-urlencoded）
+        
         std::string ctype = post_type.empty()
                                 ? std::string("application/x-www-form-urlencoded")
                                 : post_type;
@@ -532,9 +532,9 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
     }
 
     if (use_cookies) {
-        // 一次取回完整原始响应头，自解析所有 Set-Cookie 行。
-        // 不依赖 WinHttpQueryHeaders 的索引枚举：MinGW 的头文件签名与
-        // Windows SDK 不一致，会漏掉同一名字的后续响应头。
+        
+        
+        
         wchar_t raw_buf[16384] = {};
         DWORD raw_len = sizeof(raw_buf);
         if (WinHttpQueryHeaders(
@@ -571,7 +571,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 
     WinHttpCloseHandle(request);
     WinHttpCloseHandle(connect);
-    // 注意：session 由线程级缓存持有，这里不能关闭，否则下一次请求会用到野句柄。
+    
 
     if (use_cookies) {
         AbsorbSetCookies(result->final_url.empty() ? url : result->final_url,
@@ -678,7 +678,7 @@ void FetchManyParallel(const std::vector<std::string>& urls, int threads,
             size_t i = next.fetch_add(1);
             if (i >= urls.size()) break;
             FetchResult res;
-            // 子资源统一带 Referer（指向来源页），否则很多 CDN 直接 403。
+            
             FetchWithStrategies(urls[i], &res, timeout_ms, binary, true, referer);
             (*out)[i] = std::move(res);
         }
@@ -686,7 +686,7 @@ void FetchManyParallel(const std::vector<std::string>& urls, int threads,
     std::vector<std::thread> pool;
     pool.reserve((size_t)threads);
     for (int t = 0; t < threads - 1; ++t) pool.emplace_back(worker);
-    worker();  // 当前线程也干活，避免多等一个 RTT
+    worker();  
     for (auto& th : pool) th.join();
 }
 
@@ -708,4 +708,4 @@ void CookieJarAbsorbText(const std::string& url,
     AbsorbSetCookie(url, set_cookie);
 }
 
-}  // namespace zb
+}  

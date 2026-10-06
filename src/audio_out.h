@@ -5,8 +5,8 @@
 
 namespace zb {
 
-// WASAPI render output. Kept in its own translation unit because MinGW's
-// audioclient headers and Media Foundation headers conflict on ksmedia/ddraw.
+
+
 class AudioOutput {
 public:
     AudioOutput();
@@ -22,4 +22,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace zb
+}  

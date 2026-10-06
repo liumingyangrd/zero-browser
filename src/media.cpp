@@ -21,7 +21,7 @@
 #define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
 #endif
 
-// MinGW 的 mfidl.h 没有声明这个导出函数（SDK 里有），符号在 mfplat 中，自带一份声明。
+
 extern "C" HRESULT WINAPI MFCreateMFByteStreamOnStream(
     IStream* pStream, IMFByteStream** ppByteStream);
 
@@ -97,8 +97,8 @@ void SafeRelease(T** p) {
     }
 }
 
-// 自己写一个媒体缓存文件：受限环境下 MFCreateTempFile 会被拒绝，
-// 用普通 CreateFile 写到 %TEMP%\zero-browser-media（失败再退回进程目录）。
+
+
 bool WriteOwnTempFile(const std::string& bytes, std::string* path_out,
                       std::string* error) {
     static std::atomic<unsigned> counter{0};
@@ -160,10 +160,10 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
             *error = res.error.empty() ? "视频下载失败" : res.error;
             return false;
         }
-        // 首选 MFCreateTempFile：正常系统上最省事，也不留残留文件。
-        // 但它在受限环境里会返回 E_ACCESSDENIED（0x80070005），
-        // MinGW 的 mfplat 又没有 MFCreateMFByteStreamOnStream 的导入符号，
-        // 所以失败时改成“自己建缓存文件 + MFCreateFile”。
+        
+        
+        
+        
         IMFByteStream* stream = nullptr;
         HRESULT hr = MFCreateTempFile(MF_ACCESSMODE_READWRITE,
                                       MF_OPENMODE_DELETE_IF_EXIST,
@@ -210,11 +210,11 @@ bool CreateByteStream(const std::string& url, IMFByteStream** out,
     return true;
 }
 
-}  // namespace
+}  
 
 struct MediaPlayer::Impl {
     std::string url;
-    // 受限环境下自己创建的媒体缓存文件路径，播放器关闭时删除。
+    
     std::string media_temp_path;
     std::atomic<bool> stop{false};
     std::atomic<bool> playing{false};
@@ -224,9 +224,9 @@ struct MediaPlayer::Impl {
     std::atomic<bool> loop{false};
     std::atomic<bool> frame_dirty{false};
     std::atomic<bool> has_audio{false};
-    // 播放时钟。这里刻意不用 std::atomic<double>：在 32 位 MinGW + -O2 下实测
-    // 出现过跨线程写入不可见（表现为进度条跳转不生效、Seek 后位置不更新）。
-    // 改用互斥量保护普通 double，行为完全确定，代价可以忽略。
+    
+    
+    
     mutable std::mutex clock_mtx;
     double position = 0.0;
     double base_pos = 0.0;
@@ -269,7 +269,7 @@ struct MediaPlayer::Impl {
         std::lock_guard<std::mutex> lock(clock_mtx);
         seek_request = value;
     }
-    // 把播放位置直接拉到 value（跳转或重置用）。
+    
     void ResetClock(double value) {
         std::lock_guard<std::mutex> lock(clock_mtx);
         position = value;
@@ -326,7 +326,7 @@ void MediaPlayer::Impl::Run() {
     }
     if (!temp_media_path.empty()) {
         std::lock_guard<std::mutex> lock(mtx);
-        media_temp_path = temp_media_path;  // Close() 时删除
+        media_temp_path = temp_media_path;  
     }
     MDBG("media: byte stream ok\n");
 
@@ -409,7 +409,7 @@ void MediaPlayer::Impl::Run() {
     }
     PropVariantClear(&dur);
 
-    // Optional audio stream; failures just mean silent playback.
+    
     reader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
     IMFMediaType* at = nullptr;
     MFCreateMediaType(&at);
@@ -427,7 +427,7 @@ void MediaPlayer::Impl::Run() {
     has_audio = audio_ok;
     SafeRelease(&at);
     if (audio_ok) {
-        audio.Init();  // silently disabled when no output device exists
+        audio.Init();  
     }
 
     ready = true;
@@ -435,12 +435,12 @@ void MediaPlayer::Impl::Run() {
          height.load(), duration.load(), has_audio.load() ? 1 : 0);
     if (playing.load()) StartClock();
 
-    // 没有 autoplay 时也要先解出一帧当“海报帧”，否则 <video> 只会是一块纯黑。
-    // 取到首帧后置 true，暂停期间就回到休眠等待。
+    
+    
     bool first_frame_done = false;
 
     while (!stop.load()) {
-        // TakeSeek 会原子地取走并清空跳转请求（互斥量保护，跨线程可见性确定）。
+        
         double seek = TakeSeek();
         if (seek >= 0.0) {
             PROPVARIANT var;
@@ -452,7 +452,7 @@ void MediaPlayer::Impl::Run() {
             ResetClock(seek);
             MDBG("media: worker seek -> seek=%.3f position=%.3f playing=%d\n",
                  seek, GetPosition(), playing.load() ? 1 : 0);
-            // 跳转后要重新取一帧，保证暂停状态下画面也跟着跳。
+            
             first_frame_done = false;
         }
 
@@ -461,7 +461,7 @@ void MediaPlayer::Impl::Run() {
                 Sleep(10);
                 continue;
             }
-            // 否则继续往下读一个 sample，只为拿到首帧。
+            
         }
 
         DWORD stream_index = 0;
@@ -482,7 +482,7 @@ void MediaPlayer::Impl::Run() {
             }
             SetPosition(GetDuration());
             playing = false;
-            // 播完停住后允许重新取首帧，画面不会停在最后一次解码的中间态。
+            
             first_frame_done = false;
             continue;
         }
@@ -505,16 +505,16 @@ void MediaPlayer::Impl::Run() {
                     {
                         std::lock_guard<std::mutex> lock(mtx);
                         frame.assign(data, data + cur_len);
-                        // Media Foundation 输出的 RGB32 实际是 BGRX：X 字节并不保证
-                        // 是 255（实测整帧都是 0）。本引擎用预乘 AlphaBlend 合成，
-                        // alpha=0 会让整帧完全透明，表现为一块纯黑的 <video>。
-                        // 视频帧恒为不透明，这里统一补齐 alpha。
+                        
+                        
+                        
+                        
                         for (size_t i = 3; i < frame.size(); i += 4) {
                             frame[i] = 255;
                         }
                     }
                     frame_dirty = true;
-                    // 暂停时取首帧不应该推进播放位置。
+                    
                     if (playing.load()) SetPosition(target);
                     first_frame_done = true;
                     buffer->Unlock();
@@ -522,7 +522,7 @@ void MediaPlayer::Impl::Run() {
                 SafeRelease(&buffer);
             }
         } else if (stream_index == audio_index) {
-            // 只有真正在播放且未静音时才推音频；暂停取首帧时不要出声。
+            
             if (audio.ok() && playing.load() && !muted.load()) {
                 IMFMediaBuffer* buffer = nullptr;
                 if (SUCCEEDED(sample->GetBufferByIndex(0, &buffer)) && buffer) {
@@ -573,8 +573,8 @@ void MediaPlayer::Open(const std::string& url, bool autoplay, bool loop,
         impl_->frame.clear();
         impl_->error.clear();
     }
-    // 捕获 Impl* 而不是 this：MediaPlayer 对象一旦被移动/析构，捕获 this 再解引用
-    // impl_ 就是未定义行为；直接抓住 Impl 的生命周期更稳。
+    
+    
     Impl* impl = impl_.get();
     impl->worker = std::thread([impl] { impl->Run(); });
 }
@@ -592,7 +592,7 @@ void MediaPlayer::Close() {
         temp_path = impl_->media_temp_path;
         impl_->media_temp_path.clear();
     }
-    // 自己创建的媒体缓存文件在这里删除，避免留下残留。
+    
     if (!temp_path.empty()) {
         std::wstring wpath = U8ToWideLocal(temp_path);
         DeleteFileW(wpath.c_str());
@@ -694,4 +694,4 @@ MediaInfo MediaPlayer::Info() const {
     return info;
 }
 
-}  // namespace zb
+}  

@@ -17,17 +17,17 @@ namespace zb {
 namespace {
 
 Settings g_settings;
-// 系统 UI 语言是不是中文。Auto 时按它落定。
+
 bool g_system_is_chinese = false;
 bool g_system_probed = false;
 
 bool ProbeSystemChinese() {
     LANGID id = GetUserDefaultUILanguage();
-    // 主语言 ID（低 10 位）为 0x04 即中文（简繁都算）。
+    
     return (id & 0x3FF) == 0x04;
 }
 
-// 界面字符串表。加新字符串时**三列都要写**，漏写的那一列会退回 key 名。
+
 struct Entry {
     const char* key;
     const char* zh;
@@ -35,15 +35,15 @@ struct Entry {
 };
 
 const Entry kStrings[] = {
-    // 外壳
+    
     {"page.untitled", "页面", "Untitled"},
     {"status.loading", "加载中... ", "Loading... "},
-    // 地址栏右键菜单（& 后面是快捷键字母）
+    
     {"menu.cut", "剪切(&T)", "Cu&t"},
     {"menu.copy", "复制(&C)", "&Copy"},
     {"menu.paste", "粘贴(&P)", "&Paste"},
     {"menu.selectAll", "全选(&A)", "Select &All"},
-    // 错误页
+    
     {"error.heading", "页面加载失败", "Page failed to load"},
     {"error.unknown", "无法加载页面", "Unable to load the page"},
     {"error.addressLabel", "地址: ", "Address: "},
@@ -55,7 +55,7 @@ const Entry kStrings[] = {
      "Cannot parse this address. Supported: browser://, file://, data:text/html, "
      "http://, https://"},
     {"error.backHint", "返回上一页", "Go back"},
-    // 设置页
+    
     {"settings.title", "设置", "Settings"},
     {"settings.heading", "设置", "Settings"},
     {"settings.lead", "这些设置保存在本机，重启后依然有效。",
@@ -68,7 +68,7 @@ const Entry kStrings[] = {
     {"settings.storageHint", "配置文件：", "Config file: "},
     {"settings.effective", "实际生效：", "In effect: "},
     {"settings.backHome", "返回主页", "Back to home"},
-    // ---- 内置页（模板里的 {{key}} 就是这些）----
+    
     {"home.pagetitle", "Zero Browser 主页", "Zero Browser home"},
     {"home.tag", "自建渲染内核 · 演示首页",
      "Self-built rendering engine · demo home"},
@@ -168,7 +168,7 @@ std::string TrimCopy(const std::string& s) {
     return s.substr(a, b - a);
 }
 
-}  // namespace
+}  
 
 Settings& MutableSettings() { return g_settings; }
 
@@ -191,7 +191,7 @@ const char* UiLangSetting() { return LangToCode(g_settings.lang); }
 const char* T(const char* key) {
     if (!key) return "";
     const Entry* e = FindEntry(key);
-    if (!e) return key;  // 见头文件：漏翻时露出键名，不要静默留白
+    if (!e) return key;  
     return UiIsEnglish() ? e->en : e->zh;
 }
 
@@ -212,7 +212,7 @@ const char* LangToCode(Lang lang) {
 }
 
 std::string SettingsFilePath() {
-    // 测试可以先设 ZB_SETTINGS 指向临时文件，避免污染真实配置。
+    
     char buf[MAX_PATH * 2]{};
     DWORD n = GetEnvironmentVariableA("ZB_SETTINGS", buf, sizeof(buf));
     if (n > 0 && n < sizeof(buf)) return std::string(buf);
@@ -226,14 +226,14 @@ std::string SettingsFilePath() {
         base = ".";
     }
     std::string dir = base + "\\ZeroBrowser";
-    CreateDirectoryA(dir.c_str(), nullptr);  // 已存在时返回失败，无所谓
+    CreateDirectoryA(dir.c_str(), nullptr);  
     return dir + "\\settings.ini";
 }
 
 void LoadSettings() {
     std::string path = SettingsFilePath();
     FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) return;  // 首次运行没有文件，用默认值
+    if (!f) return;  
     std::string text;
     char chunk[512];
     size_t got = 0;
@@ -242,7 +242,7 @@ void LoadSettings() {
     }
     std::fclose(f);
 
-    // 极简 ini：只看 `key=value` 形式的行，段名忽略（目前只有 [ui] 一段）。
+    
     size_t pos = 0;
     while (pos <= text.size()) {
         size_t eol = text.find('\n', pos);
@@ -273,4 +273,4 @@ bool SaveSettings() {
     return ok;
 }
 
-}  // namespace zb
+}  

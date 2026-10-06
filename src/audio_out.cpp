@@ -19,7 +19,7 @@
 
 namespace zb {
 
-// MinGW does not always export these GUID symbols from mmdevapi/uuid libs.
+
 static const GUID kClsidMMDeviceEnumerator = {
     0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
 static const GUID kIidIMMDeviceEnumerator = {
@@ -114,7 +114,7 @@ void AudioOutput::Write(const uint8_t* data, uint32_t frames) {
     if (!impl_ || !data || frames == 0) return;
     Impl& d = *impl_;
     if (!d.client || !d.render) return;
-    const uint32_t frame_bytes = 4;  // 16-bit stereo
+    const uint32_t frame_bytes = 4;  
     while (frames > 0) {
         UINT32 padding = 0;
         if (FAILED(d.client->GetCurrentPadding(&padding))) return;
@@ -137,4 +137,4 @@ void AudioOutput::Close() {
     if (impl_) impl_->Close();
 }
 
-}  // namespace zb
+}  

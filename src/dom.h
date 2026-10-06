@@ -20,7 +20,7 @@ struct Node {
     Node* parent = nullptr;
     std::vector<std::unique_ptr<Node>> children;
     std::map<std::string, std::string> attrs;
-    // <img> 解码后的位图；布局时由引擎读取，非图片元素保持为空。
+    
     std::shared_ptr<Image> image;
 
     std::string Id() const {
@@ -85,10 +85,10 @@ inline std::string NodeText(const Node* node) {
     return out;
 }
 
-// 取 <img> 的实际图片来源。
-// 真实站点（大型视频站等）普遍用懒加载：src 先放 1x1 占位图，真实地址放在
-// data-src / data-original / data-lazy-src / srcset 里，由 JS 在进入视口后换过去。
-// 没有 JS 时若不兜底，整站缩略图全是空白——这是与 Chromium 最明显的观感差距之一。
+
+
+
+
 inline std::string ImageSourceOf(const Node* node) {
     if (!node) return "";
     static const char* kAttrs[] = {"src",       "data-src",      "data-original",
@@ -98,7 +98,7 @@ inline std::string ImageSourceOf(const Node* node) {
         std::string v = Trim(node->Attr(a));
         if (v.empty()) continue;
         std::string lv = Lower(v);
-        // 跳过占位图：blank.gif / 1x1 透明 gif 的 base64
+        
         if (lv.find("blank.gif") != std::string::npos ||
             lv.find("placeholder") != std::string::npos ||
             lv.find("r0lgodlhaqab") != std::string::npos) {
@@ -119,4 +119,4 @@ inline std::string ImageSourceOf(const Node* node) {
     return "";
 }
 
-}  // namespace zb
+}  

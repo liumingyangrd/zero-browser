@@ -1,5 +1,5 @@
-// 解释器核心：值转换、属性访问、函数调用、语句/表达式求值。
-// 内置对象与内置方法表在 js_builtins.cpp。
+
+
 
 #include "js.h"
 
@@ -13,7 +13,7 @@
 
 namespace zb {
 
-// ------------------------------------------------------------------ 值构造
+
 JsValue JsValue::Obj(std::shared_ptr<JsObject> o) {
     JsValue v;
     v.type = JsType::Object;
@@ -34,13 +34,13 @@ JsValue JsValue::Host(void* h, const std::string& kind, const std::string& name)
     return v;
 }
 
-// ------------------------------------------------------------------ 小工具
+
 std::string JsNumberToString(double d) {
     if (std::isnan(d)) return "NaN";
     if (std::isinf(d)) return d > 0 ? "Infinity" : "-Infinity";
     if (d == 0) return "0";
     char buf[64];
-    // 整数值直接打成整数，避免出现 "1.000000"
+    
     if (d == std::floor(d) && std::fabs(d) < 1e15) {
         snprintf(buf, sizeof(buf), "%.0f", d);
         return buf;
@@ -54,7 +54,7 @@ bool JsIsArrayIndex(const std::string& key, double* out) {
     for (char c : key) {
         if (c < '0' || c > '9') return false;
     }
-    if (key.size() > 1 && key[0] == '0') return false;  // "01" 不是下标
+    if (key.size() > 1 && key[0] == '0') return false;  
     if (out) *out = strtod(key.c_str(), nullptr);
     return true;
 }
@@ -64,7 +64,7 @@ double JsStringToNumber(const std::string& s) {
     if (t.empty()) return 0;
     if (t == "Infinity" || t == "+Infinity") return INFINITY;
     if (t == "-Infinity") return -INFINITY;
-    // 十六进制
+    
     if (t.size() > 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
         return (double)strtoll(t.c_str() + 2, nullptr, 16);
     }
@@ -86,7 +86,7 @@ std::string JsTypeOf(const JsValue& v) {
         case JsType::String: return "string";
         case JsType::Function: return "function";
         case JsType::Host:
-            // 宿主对象里的函数（方法工厂）在 call 时才算函数，这里按 object 报。
+            
             return "object";
         case JsType::Object: return "object";
     }
@@ -111,7 +111,7 @@ bool JsStrictEquals(const JsValue& a, const JsValue& b) {
     }
 }
 
-// 数字与非数字的宽松比较：字符串能转成数字就按数字比。
+
 bool JsLooseEquals(Interp& it, const JsValue& a, const JsValue& b) {
     if (a.type == b.type) return JsStrictEquals(a, b);
     if (a.IsNullish() && b.IsNullish()) return true;
@@ -133,7 +133,7 @@ bool JsLooseEquals(Interp& it, const JsValue& a, const JsValue& b) {
     return false;
 }
 
-// ------------------------------------------------------------------ 解释器
+
 Interp::Interp(JsBridge* bridge) : bridge_(bridge) {
     envs_.push_back(std::make_shared<Env>());
     global_ = std::make_shared<JsObject>();
@@ -142,13 +142,13 @@ Interp::Interp(JsBridge* bridge) : bridge_(bridge) {
 
 Interp::~Interp() = default;
 
-// 步数预算：每个语句/表达式/调用都记一步，超预算就抛异常终止这段脚本。
-// 没有它，页面里一句 while(true){} 就能把浏览器永久卡住。
-//
-// 注意"抛错本身也要花步数"这一点：错误格式化会走到 CallFunction -> JsCall ->
-// BumpSteps，如果超限后还继续抛"带 toString 的错误对象"，就会形成
-//   CallFunction -> ToPrimitive -> ToString -> CallFunction
-// 的无限递归（实测直接爆栈）。所以超限后只抛一个纯字符串值。
+
+
+
+
+
+
+
 void Interp::BumpSteps(long long n) {
     steps_ += n;
     if (steps_ > step_limit_) {
@@ -160,8 +160,8 @@ void Interp::BumpSteps(long long n) {
     }
 }
 
-// 安全的错误文本：不调用 JS 的 toString（那会回调解释器，见上），
-// 直接从属性里读 name/message。
+
+
 std::string Interp::ErrorText(const JsValue& v) {
     if (v.type == JsType::Object && v.obj) {
         std::string ns;
@@ -239,13 +239,13 @@ void Interp::NoteScript(bool ok, long long steps, const std::string& err) {
     stats_.steps += steps;
 }
 
-// ------------------------------------------------------------------ 类型转换
+
 JsValue Interp::ToPrimitive(const JsValue& v) {
     if (!v.IsObjectLike()) return v;
     if (v.type == JsType::Host) {
         return JsValue::Str(ToString(v));
     }
-    // 对象：有 valueOf/toString 就调用（数组的 toString 会 join）
+    
     if (v.obj) {
         auto it = v.obj->props.find("valueOf");
         if (it == v.obj->props.end()) it = v.obj->props.find("toString");
@@ -256,7 +256,7 @@ JsValue Interp::ToPrimitive(const JsValue& v) {
             }
         }
         if (v.obj->is_array) {
-            // 数组默认 toString = join(",")
+            
             std::string out;
             for (double i = 0; i < v.obj->length; ++i) {
                 if (i > 0) out += ",";
@@ -289,8 +289,8 @@ std::string Interp::ToString(const JsValue& v) {
     if (v.obj && v.obj->is_array) {
         return ToString(ToPrimitive(v));
     }
-    // 对象：优先用自身的 toString（Error 就是靠它把 name/message 拼出来的）。
-    // ToPrimitive 内部已经按 valueOf -> toString 的顺序尝试过。
+    
+    
     if (v.obj) {
         JsValue prim = ToPrimitive(v);
         if (!prim.IsObjectLike()) return ToString(prim);
@@ -324,8 +324,8 @@ JsValue Interp::MakeError(const std::string& message) {
     JsValue e = NewObject();
     e.obj->props["name"] = JsValue::Str("Error");
     e.obj->props["message"] = JsValue::Str(message);
-    // 自带 toString：否则 String(err) 只会得到 "[object Object]"，
-    // 诊断信息里就看不到真正的原因。
+    
+    
     e.obj->props["toString"] = MakeNative(
         "toString",
         [](Interp& in, void*, const std::string&, const std::vector<JsValue>&,
@@ -338,8 +338,8 @@ JsValue Interp::MakeError(const std::string& message) {
     return e;
 }
 
-// 用户函数自动带一个 prototype 对象：`function P(){}; P.prototype.m = ...;`
-// 与 `new P()` 之后的 instanceof 都依赖它。缺了它 p.sum() 会报"不是函数"。
+
+
 void EnsurePrototype(Interp& it, const std::shared_ptr<JsObject>& fn) {
     if (!fn) return;
     if (fn->props.find("prototype") == fn->props.end()) {
@@ -351,7 +351,7 @@ void JsThrowError(Interp& it, const std::string& msg) {
     throw JsThrow{it.MakeError(msg)};
 }
 
-// -------------------------------------------------------------- 数组/类数组
+
 double JsLengthOf(Interp& it, const JsValue& v) {
     if (v.IsNullish()) return 0;
     if (v.type == JsType::String) return (double)v.str.size();
@@ -379,7 +379,7 @@ void JsSetIndex(Interp& it, const JsValue& v, double i, const JsValue& val) {
     JsSetProp(it, v, JsNumberToString(i), val);
 }
 
-// ---------------------------------------------------------------- 属性访问
+
 namespace {
 JsValue LookupInTable(const JsMethodDef* defs, size_t n, const std::string& key,
                       const char* owner) {
@@ -396,7 +396,7 @@ JsValue LookupInTable(const JsMethodDef* defs, size_t n, const std::string& key,
     }
     return JsValue::Undef();
 }
-}  // namespace
+}  
 
 JsValue JsGetProp(Interp& it, const JsValue& base, const std::string& key) {
     if (base.IsNullish()) {
@@ -419,7 +419,7 @@ JsValue JsGetProp(Interp& it, const JsValue& base, const std::string& key) {
         const JsMethodDef* d = JsStringMethods(&n);
         JsValue m = LookupInTable(d, n, key, "String");
         if (m.type == JsType::Function) return m;
-        // 下标访问：'abc'[0]
+        
         double idx = 0;
         if (JsIsArrayIndex(key, &idx)) {
             if (idx >= 0 && idx < (double)base.str.size()) {
@@ -463,11 +463,11 @@ JsValue JsGetProp(Interp& it, const JsValue& base, const std::string& key) {
         }
         return JsValue::Undef();
     }
-    // 普通对象 / 数组
+    
     if (base.obj) {
         auto own = base.obj->props.find(key);
         if (own != base.obj->props.end()) return own->second;
-        // 原型链回退：new Date().getTime()、自定义原型方法走这条路径。
+        
         for (auto p = base.obj->proto; p; p = p->proto) {
             auto it2 = p->props.find(key);
             if (it2 != p->props.end()) return it2->second;
@@ -478,7 +478,7 @@ JsValue JsGetProp(Interp& it, const JsValue& base, const std::string& key) {
             const JsMethodDef* d = JsArrayMethods(&n);
             JsValue m = LookupInTable(d, n, key, "Array");
             if (m.type == JsType::Function) return m;
-            // 数组也允许用对象方法（hasOwnProperty 等）
+            
             const JsMethodDef* od = JsObjectMethods(&n);
             return LookupInTable(od, n, key, "Object");
         }
@@ -497,7 +497,7 @@ void JsSetProp(Interp& it, const JsValue& base, const std::string& key,
         }
         return;
     }
-    if (!base.obj) return;  // 基本类型的属性赋值：非严格模式下静默忽略
+    if (!base.obj) return;  
     if (base.obj->is_array) {
         if (key == "length") {
             double n = it.ToNumber(v);
@@ -514,7 +514,7 @@ void JsSetProp(Interp& it, const JsValue& base, const std::string& key,
     base.obj->props[key] = v;
 }
 
-// ------------------------------------------------------------------ 函数调用
+
 JsValue JsCall(Interp& it, const JsValue& fn, const JsValue& this_val,
                const std::vector<JsValue>& args) {
     if (!JsIsCallable(fn)) {
@@ -523,7 +523,7 @@ JsValue JsCall(Interp& it, const JsValue& fn, const JsValue& this_val,
     if (!it.EnterCall()) {
         JsThrowError(it, "调用层级过深（疑似无限递归），已中止");
     }
-    // RAII：无论正常返回还是抛异常，都要把调用深度还回去。
+    
     struct DepthGuard {
         Interp& it;
         ~DepthGuard() { it.LeaveCall(); }
@@ -536,7 +536,7 @@ JsValue JsCall(Interp& it, const JsValue& fn, const JsValue& this_val,
         }
         return out;
     }
-    // 用户函数
+    
     auto env = std::make_shared<Env>();
     env->parent = fn.obj->closure;
     env->is_function_scope = true;
@@ -548,10 +548,10 @@ JsValue JsCall(Interp& it, const JsValue& fn, const JsValue& this_val,
         env->vars[fn.obj->params[i]] =
             i < args.size() ? args[i] : JsValue::Undef();
     }
-    // arguments：本项目里直接做成真数组（真机是类数组对象），
-    // 这样 Array.prototype.slice.call(arguments) 依然可用。
+    
+    
     env->vars["arguments"] = it.NewArray(args);
-    // 函数体顶层的函数声明与 var 提升（body 在解析时已展开成语句序列）。
+    
     for (const AstNode* s : fn.obj->body) {
         if (!s) continue;
         if (s->kind == AstKind::FunctionDecl) {
@@ -610,17 +610,17 @@ void Interp::SetProp(const JsValue& base, const std::string& key,
     JsSetProp(*this, base, key, v);
 }
 
-// ------------------------------------------------------------------ 求值
+
 namespace {
 struct Ref {
-    // 赋值目标：变量 或 对象属性
+    
     Env* env = nullptr;
     std::string name;
     JsValue base;
     std::string key;
     bool is_prop = false;
 };
-}  // namespace
+}  
 
 JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
     if (!n) return JsValue::Undef();
@@ -642,7 +642,7 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
             if (v) return *v;
             auto it = global_->props.find(n->str);
             if (it != global_->props.end()) return it->second;
-            // 未声明变量：返回 undefined（非严格模式）
+            
             return JsValue::Undef();
         }
         case AstKind::Array: {
@@ -656,7 +656,7 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
             for (size_t i = 0; i < n->kids.size(); ++i) {
                 bool computed = i < n->flags.size() && n->flags[i] == 1;
                 if (computed) {
-                    // 计算属性名：解析器把 [key] 与 value 成对放进 kids。
+                    
                     std::string key = ToString(EvalExpr(n->kids[i], env));
                     if (i + 1 < n->kids.size()) {
                         JsSetProp(*this, o, key, EvalExpr(n->kids[i + 1], env));
@@ -677,7 +677,7 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
             return JsGetProp(*this, base, key);
         }
         case AstKind::Call: {
-            // 方法调用要把接收者当 this
+            
             if (n->kids[0] && n->kids[0]->kind == AstKind::Member) {
                 const AstNode* m = n->kids[0];
                 JsValue base = EvalExpr(m->kids[0], env);
@@ -706,8 +706,8 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
             JsValue obj = NewObject();
             if (fn.type == JsType::Function && fn.obj) {
                 obj.obj->name = fn.obj->name;
-                // new 出来的对象原型指向 F.prototype，自定义构造函数的
-                // instanceof 与原型方法查找才能正常工作。
+                
+                
                 auto pit = fn.obj->props.find("prototype");
                 if (pit != fn.obj->props.end() && pit->second.obj) {
                     obj.obj->proto = pit->second.obj;
@@ -742,7 +742,7 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
         case AstKind::Unary: {
             const std::string& op = n->str;
             if (op == "typeof") {
-                // typeof 未声明变量不能抛异常
+                
                 if (n->kids[0]->kind == AstKind::Ident &&
                     !env.Find(n->kids[0]->str) &&
                     global_->props.find(n->kids[0]->str) == global_->props.end()) {
@@ -774,7 +774,7 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
             return JsValue::Undef();
         }
         case AstKind::Update: {
-            // ++/-- 需要写回目标，所以这里分别处理变量与属性
+            
             const AstNode* target = n->kids[0];
             double old = 0;
             if (target->kind == AstKind::Ident) {
@@ -802,7 +802,7 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
             JsValue l = EvalExpr(n->kids[0], env);
             if (n->str == "&&") return ToBool(l) ? EvalExpr(n->kids[1], env) : l;
             if (n->str == "||") return ToBool(l) ? l : EvalExpr(n->kids[1], env);
-            // ??
+            
             if (n->str == "??") return l.IsNullish() ? EvalExpr(n->kids[1], env) : l;
             return l;
         }
@@ -867,7 +867,7 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
             if (op == "instanceof") {
                 if (!b.obj || !JsIsCallable(b)) return JsValue::Bool(false);
                 if (!a.obj) return JsValue::Bool(false);
-                // 优先按原型链判断（自定义构造函数都能正确工作）
+                
                 JsValue proto = JsGetProp(*this, b, "prototype");
                 if (proto.obj) {
                     for (auto p = a.obj->proto; p; p = p->proto) {
@@ -886,7 +886,7 @@ JsValue Interp::EvalExpr(const AstNode* n, Env& env) {
             const AstNode* target = n->kids[0];
             JsValue rhs = EvalExpr(n->kids[1], env);
             if (n->str != "=") {
-                // 复合赋值：读旧值、按对应运算符算、再写回
+                
                 JsValue old;
                 if (target->kind == AstKind::Ident) {
                     JsValue* v = env.Find(target->str);
@@ -948,11 +948,11 @@ void Interp::EvalStmt(const AstNode* n, Env& env) {
             EvalExpr(n->kids[0], env);
             return;
         case AstKind::Block: {
-            // 不做块级作用域：整块就在当前环境里执行。
-            // 早先的实现给块建了一个局部 Env、并把外层 Env 按值拷贝当父作用域，
-            // 于是块内读到的是外层变量的副本：for 的循环变量永远停在初值、
-            // while 里的 i++ 改不到真变量（表现为死循环直到步数超限）。
-            // 取舍：let/const 因此等价于 var（README 里列为已知偏差）。
+            
+            
+            
+            
+            
             for (const AstNode* s : n->kids) EvalStmt(s, env);
             return;
         }
@@ -1041,7 +1041,7 @@ void Interp::EvalStmt(const AstNode* n, Env& env) {
             std::vector<JsValue> items;
             if (is_of) {
                 if (obj.type == JsType::String) {
-                    // 按码点遍历字符串
+                    
                     size_t i = 0;
                     while (i < obj.str.size()) {
                         unsigned char c = (unsigned char)obj.str[i];
@@ -1095,8 +1095,8 @@ void Interp::EvalStmt(const AstNode* n, Env& env) {
                     EvalStmt(n->kids[0], env);
                 } catch (JsThrow& t) {
                     if (n->kids.size() > 1 && n->kids[1]) {
-                        // catch 变量临时绑到当前作用域（没有块级作用域），
-                        // 执行完恢复原绑定，避免污染同名变量。
+                        
+                        
                         const std::string& pname =
                             n->names.empty() ? std::string() : n->names[0];
                         bool had = false;
@@ -1167,8 +1167,8 @@ void Interp::EvalStmt(const AstNode* n, Env& env) {
     }
 }
 
-// ------------------------------------------------------------------ 入口
-// 求值一个表达式：内联事件属性（onclick="return false"）与需要"取值"的场景用。
+
+
 bool Interp::EvalExpression(const std::string& src, JsValue* out) {
     error_.clear();
     exhausted_ = false;
@@ -1213,7 +1213,7 @@ bool Interp::RunScript(const std::string& code, const std::string& name) {
         return false;
     }
     Env* env = envs_.front().get();
-    // 顶层 var / function 也要提升，否则“先调用后声明”的页面会直接报错
+    
     for (const AstNode* s : prog->kids) {
         if (!s) continue;
         if (s->kind == AstKind::FunctionDecl) {
@@ -1244,7 +1244,7 @@ bool Interp::RunScript(const std::string& code, const std::string& name) {
         NoteScript(false, steps_, error_);
         return false;
     } catch (JsReturn&) {
-        // 顶层 return：当正常结束
+        
     } catch (JsBreak&) {
     } catch (JsContinue&) {
     } catch (const std::exception& e) {
@@ -1256,4 +1256,4 @@ bool Interp::RunScript(const std::string& code, const std::string& name) {
     return true;
 }
 
-}  // namespace zb
+}  

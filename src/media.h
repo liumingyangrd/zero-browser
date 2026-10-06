@@ -18,9 +18,9 @@ struct MediaInfo {
     std::string error;
 };
 
-// Video/audio playback built on Windows Media Foundation for decode and
-// WASAPI for audio output. Layout, controls, timeline and frame painting stay
-// in the self-built browser engine.
+
+
+
 class MediaPlayer {
 public:
     MediaPlayer();
@@ -44,7 +44,7 @@ public:
     void SetMuted(bool muted);
     bool Muted() const;
 
-    // Called from the UI timer. Returns true when a new frame is available.
+    
     bool Update();
     bool CopyFrame(std::vector<uint8_t>* bgra, int* width, int* height);
 
@@ -55,4 +55,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace zb
+}  

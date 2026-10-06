@@ -16,10 +16,10 @@ struct Length {
     float value = 0.f;
 };
 
-// margin / padding 的默认值必须是 0，而不是 auto。
-// Length 默认 is_auto=true 是给 width / height / left / top 这类“可为 auto”的
-// 属性用的；如果 margin 也用这个默认值，那么每个块的左右 margin 都会被当成
-// auto，于是所有固定宽度的块（video、img 等）都会被错误地水平居中。
+
+
+
+
 inline Length ZeroLength() {
     Length l;
     l.is_auto = false;
@@ -32,7 +32,7 @@ struct Style {
     std::string display = "block";
     std::string color = "#111827";
     std::string background = "";
-    // background-image 的原始 url(...) 内容；PaintBox 用它查已解码图片。
+    
     std::string background_image;
     std::string background_size = "auto";
     std::string border_color = "#d6dbe4";
@@ -56,12 +56,12 @@ struct Style {
     bool bold = false;
     bool italic = false;
     bool underline = false;
-    // 字体族（逗号分隔的候选列表，绘制时取第一个可用字体）。
+    
     std::string font_family = "Segoe UI";
-    // 数值字重：400 normal / 700 bold，Chromium 用 300~900。
+    
     int font_weight = 400;
     std::string text_align = "left";
-    // 未显式设置 line-height 时置 0，表示按字体的真实度量取行高（等价 normal）。
+    
     float line_height = 0.f;
     std::string text_transform = "none";
     float letter_spacing = 0.f;
@@ -69,27 +69,27 @@ struct Style {
     std::string justify_content = "flex-start";
     std::string align_items = "stretch";
     std::string flex_wrap = "nowrap";
-    std::string grid_template_columns;  // 原始 grid-template-columns 值
-    std::string grid_column;            // 原始 grid-column 值
+    std::string grid_template_columns;  
+    std::string grid_column;            
     std::string overflow = "visible";
     std::string white_space = "normal";
-    // float: none | left | right。名字不能叫 float（C++ 关键字）。
-    // 网格框架（Amaze UI 这一类）整站分栏就靠它，不实现的话所有
-    // .am-u-md-* 列都退化成竖排块流，页面挤成一条窄栏。
+    
+    
+    
     std::string css_float = "none";
-    // clear: none | left | right | both
+    
     std::string clear = "none";
     int gap = 0;
     bool box_border_box = true;
     float opacity = 1.f;
-    // box-shadow：首个阴影（Chromium 支持多个，这里取第一个）
+    
     bool has_shadow = false;
     int shadow_x = 0;
     int shadow_y = 0;
     int shadow_blur = 0;
     int shadow_spread = 0;
     std::string shadow_color = "rgba(0,0,0,0.2)";
-    // 背景（平铺方式与定位）
+    
     std::string background_repeat = "repeat";
     std::string background_position = "0% 0%";
     Length background_position_x;
@@ -114,7 +114,7 @@ struct Style {
 
 struct AttrTest {
     std::string name;
-    std::string op;  // ""（仅存在）、"="、"^="、"$="、"*="、"~="、"|="
+    std::string op;  
     std::string value;
 };
 
@@ -132,8 +132,8 @@ struct CssRule {
     int index = 0;
 };
 
-// 结构伪类求值。状态伪类（:hover/:focus/...）本引擎没有交互状态，
-// 一律判为不匹配——否则 `input:focus{border:blue}` 这类规则会永远生效。
+
+
 inline bool PseudoMatches(const Node* node, const std::string& raw) {
     std::string name = raw;
     std::string arg;
@@ -157,7 +157,7 @@ inline bool PseudoMatches(const Node* node, const std::string& raw) {
     for (const char* s : kState) {
         if (name == s) return false;
     }
-    if (name == "not") return true;  // 无法安全求值：不限制，避免整条规则失效
+    if (name == "not") return true;  
     if (name == "root") {
         return node->parent == nullptr || node->parent->type == NodeType::Document;
     }
@@ -175,7 +175,7 @@ inline bool PseudoMatches(const Node* node, const std::string& raw) {
     if (!(name == "first-child" || name == "last-child" ||
           name == "only-child" || name == "first-of-type" ||
           name == "last-of-type" || name == "only-of-type" || nth)) {
-        return true;  // 未知伪类不限制
+        return true;  
     }
 
     const Node* parent = node->parent;
@@ -197,7 +197,7 @@ inline bool PseudoMatches(const Node* node, const std::string& raw) {
     if (name == "first-child" || name == "first-of-type") return idx == 0;
     if (name == "last-child" || name == "last-of-type") return idx == n - 1;
 
-    // nth-child / nth-last-child / nth-of-type / nth-last-of-type
+    
     int pos = from_end ? (n - idx) : (idx + 1);
     if (arg.empty()) return false;
     if (arg == "odd") return pos % 2 == 1;
@@ -298,7 +298,7 @@ inline Style DefaultStyle() {
     return s;
 }
 
-// 视口尺寸，供 vh / vw / calc 折算。由引擎在布局前写入。
+
 inline int& CssViewportWidth() {
     static int w = 1280;
     return w;
@@ -308,7 +308,7 @@ inline int& CssViewportHeight() {
     return h;
 }
 
-// 解析一个长度分量。unit: 0=px 1=% 2=rem 3=em 4=vh 5=vw。
+
 inline bool ParseLengthToken(const std::string& raw, float* out, int* unit) {
     std::string v = Trim(Lower(raw));
     if (v.empty()) return false;
@@ -333,13 +333,13 @@ inline bool ParseLengthToken(const std::string& raw, float* out, int* unit) {
     if (u == "in") { *out *= 96.f; *unit = 0; return true; }
     if (u == "cm") { *out *= 37.795f; *unit = 0; return true; }
     if (u == "mm") { *out *= 3.7795f; *unit = 0; return true; }
-    // ch / ex 按半个字号近似
+    
     if (u == "ch" || u == "ex") { *out *= 8.f; *unit = 0; return true; }
     return false;
 }
 
-// calc() 求值：支持 length 之间的 + -，以及 <数字> * <length>。
-// 求不出来返回 false（调用方按 auto 处理，绝不能退化成 0）。
+
+
 inline bool EvalCalcTerm(const std::string& raw, float* px, float* pct) {
     std::string t = Trim(raw);
     if (t.empty()) return false;
@@ -352,8 +352,8 @@ inline bool EvalCalcTerm(const std::string& raw, float* px, float* pct) {
         bool lok = ParseLengthToken(l, &ln, &lu);
         bool rok = ParseLengthToken(r, &rn, &ru);
         if (!lok || !rok) return false;
-        if (lu != 0 && ru != 0) return false;  // 长度×长度没有意义
-        float scale = (lu == 0) ? ln : rn;     // 用无单位的那一侧做倍数
+        if (lu != 0 && ru != 0) return false;  
+        float scale = (lu == 0) ? ln : rn;     
         float val = (lu == 0) ? rn : ln;
         int unit = (lu == 0) ? ru : lu;
         switch (unit) {
@@ -393,7 +393,7 @@ inline bool EvalCalc(const std::string& raw, float* px_out, float* pct_out) {
         char c = at_end ? '+' : inner[i];
         bool is_sign = (!at_end && (c == '+' || c == '-'));
         if (is_sign) {
-            // 负号可能是数值的一部分（如 calc(-10px + 50%)）
+            
             size_t j = i;
             bool prev_is_operand = false;
             while (j > 0) {
@@ -434,9 +434,9 @@ inline bool EvalCalc(const std::string& raw, float* px_out, float* pct_out) {
 inline void SetLength(Length& out, const std::string& value, bool is_num = false) {
     std::string v = Trim(Lower(value));
     out = Length{};
-    // 这些值一律按 auto 处理。绝不能落到 atof() 变成 0：
-    // 真实站点大量使用 max-content / fit-content / calc()，一旦被当成 0，
-    // 整个容器宽度就是 0，页面会“渲染成空白”。
+    
+    
+    
     if (v.empty() || v == "auto" || v == "none" || v == "max-content" ||
         v == "min-content" || v == "fit-content" || v == "fill-available" ||
         v == "stretch" || v == "inherit" || v == "initial" || v == "unset" ||
@@ -465,7 +465,7 @@ inline void SetLength(Length& out, const std::string& value, bool is_num = false
     }
     float num = 0;
     int unit = 0;
-    if (!ParseLengthToken(v, &num, &unit)) return;  // 未知单位 → auto
+    if (!ParseLengthToken(v, &num, &unit)) return;  
     out.is_auto = false;
     switch (unit) {
         case 1: out.percent = true; out.value = num; break;
@@ -490,7 +490,7 @@ inline Color ColorFromCss(const std::string& value) {
             return c;
         }
         std::string args = v.substr(open + 1, close - open - 1);
-        // 兼容 rgb(0 0 0 / 50%) 这种空格写法：把空格与斜杠也当分隔符
+        
         std::string norm = args;
         for (char& ch : norm) {
             if (ch == ' ' || ch == '\t' || ch == '/') ch = ',';
@@ -556,7 +556,7 @@ inline Color ColorFromCss(const std::string& value) {
             return c;
         }
     }
-    // #RRGGBBAA / #RGBA
+    
     if (v[0] == '#' && (v.size() == 9 || v.size() == 5)) {
         auto nib = [&](size_t i) -> int {
             char x = v[i];
@@ -655,10 +655,10 @@ inline Color ColorFromCss(const std::string& value) {
     return c;
 }
 
-// --- CSS 自定义属性（CSS 变量）---------------------------------------------
-// 真实站点大量用 var(--x) 定义颜色/间距/尺寸，
-// 不支持它会导致颜色全部回退、间距丢失，版式与 Chromium 相差很远。
-// 做法：解析样式表时把所有 `--name: value` 收进一张表，应用声明时替换 var()。
+
+
+
+
 inline std::map<std::string, std::string>& CssVars() {
     static std::map<std::string, std::string> vars;
     return vars;
@@ -666,30 +666,30 @@ inline std::map<std::string, std::string>& CssVars() {
 
 inline void CssVarsReset() { CssVars().clear(); }
 
-// --- 字号与 rem 基准 --------------------------------------------------------
-// 根元素（html）的字号，rem 的基准，浏览器默认 16px。页面若写了
-// html{font-size:62.5%}，rem 基准就跟着变，所以必须真的记下来。
+
+
+
 inline int& RootFontSize() {
     static int px = 16;
     return px;
 }
 
-// font-size 解析。这里曾经把所有非 px 的值都当成"无单位数字取整"，
-// 于是 CSS 里最常见的 1.4rem → (int)1.4 = 1px、1.6rem → 1px、2em → 2px：
-// 整站正文塌成一两个像素、所有行叠成一团黑。某评测站的网格框架里 1.4rem
-// 出现 30 次，公告栏直接糊成一条。现在按 CSS 规则区分 px / % / em / rem / 关键字。
+
+
+
+
 inline int ParseFontSize(const std::string& raw, int parent_px) {
     std::string v = Trim(raw);
     if (v.empty()) return parent_px;
     std::string lv = Lower(v);
     float n = (float)std::atof(v.c_str());
     auto scaled = [](float factor, int base) {
-        if (factor <= 0.f) return 0;  // font-size:0 是有意义的（常用于消掉空白）
+        if (factor <= 0.f) return 0;  
         return std::max(1, (int)std::lround(factor * base));
     };
     if (EndsWith(lv, "px")) return scaled(n, 1);
     if (EndsWith(lv, "%")) return scaled(n / 100.f, parent_px);
-    // rem 必须排在 em 前面判断：两者都以 "em" 结尾。
+    
     if (EndsWith(lv, "rem")) return scaled(n, RootFontSize());
     if (EndsWith(lv, "em")) return scaled(n, parent_px);
     if (lv == "small") return 13;
@@ -701,11 +701,11 @@ inline int ParseFontSize(const std::string& raw, int parent_px) {
     if (lv == "smaller") return std::max(1, (int)std::lround(parent_px * 0.8333f));
     if (lv == "larger") return std::max(1, (int)std::lround(parent_px * 1.2f));
     if (lv == "inherit" || lv == "unset" || lv == "initial") return parent_px;
-    if (n > 0.f) return scaled(n, parent_px);  // 非标准写法：按父级倍数处理
+    if (n > 0.f) return scaled(n, parent_px);  
     return parent_px;
 }
 
-// 替换 value 里的 var(--name[, fallback])，支持嵌套。
+
 inline std::string SubstituteVars(const std::string& value) {
     if (value.find("var(") == std::string::npos) return value;
     std::string out;
@@ -718,7 +718,7 @@ inline std::string SubstituteVars(const std::string& value) {
             break;
         }
         out += value.substr(i, p - i);
-        size_t open = p + 3;  // 指向 '('
+        size_t open = p + 3;  
         int depth = 0;
         size_t j = open;
         bool closed = false;
@@ -754,12 +754,12 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
                              const std::string& value_raw) {
     std::string name = Lower(Trim(name_raw));
     std::string value = Trim(value_raw);
-    // !important 只做“去标记”处理：本项目按文档顺序应用，不做完整优先级层叠。
+    
     if (EndsWith(Lower(value), "!important")) {
         value = Trim(value.substr(0, value.size() - 10));
     }
     if (name.size() > 2 && name[0] == '-' && name[1] == '-') {
-        CssVars()[name] = value;  // 收集 CSS 变量定义
+        CssVars()[name] = value;  
         return;
     }
     value = SubstituteVars(value);
@@ -780,7 +780,7 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
     }
     else if (name == "color") s.color = value;
     else if (name == "background-color" || name == "background") {
-        // background 简写里如果带 url(...)，同时记录背景图。
+        
         s.background = value;
         size_t up = value.find("url(");
         if (up != std::string::npos) {
@@ -839,7 +839,7 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
         if (s.border_width == 0) s.border_width = 1;
     }
     else if (name == "font-size") {
-        // 基准是父元素字号（s 是从父样式拷来的，此刻还没被覆盖）。
+        
         s.font_size = ParseFontSize(value, s.font_size);
     }
     else if (name == "font-weight") {
@@ -911,7 +911,7 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
     else if (name == "align-items") s.align_items = Lower(value);
     else if (name == "grid-template-columns") s.grid_template_columns = value;
     else if (name == "grid-template-rows") {
-        // 网格行暂时不显式建 track；由子项高度撑起。
+        
     }
     else if (name == "grid-column") s.grid_column = Lower(value);
     else if (name == "float") s.css_float = Lower(value);
@@ -923,7 +923,7 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
     }
     else if (name == "box-sizing") s.box_border_box = Lower(value) == "border-box";
     else if (name == "font-family") {
-        // 取候选列表里的第一个族名（去引号）；绘制时按顺序尝试。
+        
         std::string v = value;
         std::string first;
         int depth = 0;
@@ -949,12 +949,12 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
             int w = std::atoi(v.c_str());
             if (w >= 100 && w <= 1000) {
                 s.font_weight = w;
-                s.bold = w >= 600;  // 600 以上用粗体近似
+                s.bold = w >= 600;  
             }
         }
     }
     else if (name == "font") {
-        // 简写：至少识别其中的 font-size 与 font-weight，族名取最后一段
+        
         auto parts = SplitStr(value, ' ');
         for (const auto& p : parts) {
             std::string t = Lower(Trim(p));
@@ -980,7 +980,7 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
     else if (name == "box-shadow") {
         std::string v = Lower(value);
         if (v != "none" && !v.empty()) {
-            // 只取第一个阴影：颜色 + 数值（x y blur spread）
+            
             std::string color_part;
             size_t cp = value.find("rgb");
             if (cp == std::string::npos) cp = value.find('#');
@@ -1032,7 +1032,7 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
         s.has_background_position = true;
     }
     else if (name == "flex-wrap") s.flex_wrap = Lower(value);
-    else if (name == "text-overflow") { /* 由 overflow 近似处理，暂不单独实现 */ }
+    else if (name == "text-overflow") {  }
 }
 
 inline void ApplyStyleAttr(const Node* node, Style& style) {
@@ -1072,4 +1072,4 @@ inline Style ComputeStyleCss(const Node* node,
     return s;
 }
 
-}  // namespace zb
+}  

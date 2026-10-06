@@ -1,5 +1,5 @@
-// 全局对象与内置构造函数：Math / JSON / Date / Error / console 以及
-// parseInt、String、Array、Object 等。方法表在 js_builtins.cpp。
+
+
 
 #include "js.h"
 
@@ -23,7 +23,7 @@ JsValue Arg(const Args& a, size_t i) {
     return i < a.size() ? a[i] : JsValue::Undef();
 }
 
-// ------------------------------------------------------------------- JSON
+
 void JsonEscape(const std::string& s, std::string* out) {
     *out += '"';
     for (unsigned char c : s) {
@@ -48,7 +48,7 @@ void JsonEscape(const std::string& s, std::string* out) {
     *out += '"';
 }
 
-// 打环保护：JSON.stringify 遇到环形引用要报错而不是无限递归。
+
 bool JsonStringify(Interp& it, const JsValue& v, std::string* out, int depth,
                    std::vector<const JsObject*>* seen) {
     if (depth > 64) return false;
@@ -76,7 +76,7 @@ bool JsonStringify(Interp& it, const JsValue& v, std::string* out, int depth,
         return true;
     }
     for (const JsObject* o : *seen) {
-        if (o == v.obj.get()) return false;  // 环形引用
+        if (o == v.obj.get()) return false;  
     }
     seen->push_back(v.obj.get());
     bool ok = true;
@@ -200,7 +200,7 @@ struct JsonParser {
             i += 4;
             return JsValue::Null();
         }
-        // 数字
+        
         size_t start = i;
         if (s[i] == '-' || s[i] == '+') ++i;
         while (i < s.size() && (isdigit((unsigned char)s[i]) || s[i] == '.' ||
@@ -260,7 +260,7 @@ struct JsonParser {
     }
 };
 
-// --------------------------------------------------------------- 百分号编码
+
 std::string PercentEncode(const std::string& s, const char* keep) {
     static const char* hex = "0123456789ABCDEF";
     std::string out;
@@ -300,18 +300,18 @@ std::string PercentDecode(const std::string& s) {
     return out;
 }
 
-// 取"包装成构造函数"的原生函数：new F() 时把结果写到 this 上。
 
-}  // namespace
 
-// ------------------------------------------------------------------ 安装
+}  
+
+
 void Interp::InstallBuiltins() {
-    // 常量
+    
     AddGlobal("NaN", JsValue::Num(NAN));
     AddGlobal("Infinity", JsValue::Num(INFINITY));
     AddGlobal("undefined", JsValue::Undef());
 
-    // 数值/字符串转换
+    
     AddGlobal("parseInt", MakeNative(
         "parseInt",
         [](Interp& it, void*, const std::string&, const Args& a,
@@ -395,7 +395,7 @@ void Interp::InstallBuiltins() {
             return true;
         }));
 
-    // String / Number / Boolean 转换函数
+    
     AddGlobal("String", MakeNative(
         "String",
         [](Interp& it, void*, const std::string&, const Args& a,
@@ -418,7 +418,7 @@ void Interp::InstallBuiltins() {
             return true;
         }));
 
-    // Array
+    
     JsValue arrayCtor = MakeNative(
         "Array",
         [](Interp& it, void*, const std::string&, const Args& a,
@@ -444,7 +444,7 @@ void Interp::InstallBuiltins() {
             std::vector<JsValue> items;
             if (!a.empty()) {
                 if (a[0].type == JsType::String) {
-                    // 字符串按码点拆（'ab' -> ['a','b']）
+                    
                     const std::string& s = a[0].str;
                     size_t i = 0;
                     while (i < s.size()) {
@@ -476,7 +476,7 @@ void Interp::InstallBuiltins() {
         });
     AddGlobal("Array", arrayCtor);
 
-    // Object
+    
     JsValue objectCtor = MakeNative(
         "Object",
         [](Interp& it, void*, const std::string&, const Args& a,
@@ -488,9 +488,9 @@ void Interp::InstallBuiltins() {
             }
             return true;
         });
-    // 注意：必须先把表与计数取到局部变量再调用。写成
-    // JsMethodTableObject(JsObjectMethods(&na), na) 是错的 —— C++ 不保证实参
-    // 求值顺序，na 可能先被读走（垃圾值），于是按垃圾长度遍历方法表而崩溃。
+    
+    
+    
     const JsMethodDef* om = JsObjectMethods(&na);
     objectCtor.obj->props["prototype"] = JsMethodTableObject(om, na);
     objectCtor.obj->props["keys"] = MakeNative(
@@ -561,7 +561,7 @@ void Interp::InstallBuiltins() {
         [](Interp& it, void*, const std::string&, const Args& a,
            const JsValue&, JsValue* out) -> bool {
             JsValue o = it.NewObject();
-            // 只处理原型参数；第二参数（属性描述符）忽略。
+            
             if (!a.empty() && a[0].obj) o.obj->proto = a[0].obj;
             *out = o;
             return true;
@@ -588,7 +588,7 @@ void Interp::InstallBuiltins() {
         });
     AddGlobal("Object", objectCtor);
 
-    // Function.prototype（call/apply/bind）
+    
     const JsMethodDef* fm = JsFunctionMethods(&na);
     JsValue functionProto = JsMethodTableObject(fm, na);
     global_->props["Function"] = JsValue::Obj([&] {
@@ -598,7 +598,7 @@ void Interp::InstallBuiltins() {
         o->name = "Function";
         o->native = [](Interp& it, void*, const std::string&, const Args&,
                        const JsValue&, JsValue* out) -> bool {
-            // 不做动态编译：Function(...) 返回一个空函数（README 里列为未实现）
+            
             *out = it.MakeNative("anonymous",
                                  [](Interp&, void*, const std::string&,
                                     const Args&, const JsValue&,
@@ -612,7 +612,7 @@ void Interp::InstallBuiltins() {
         return o;
     }());
 
-    // String.prototype（fromCharCode）
+    
     JsValue stringCtor = MakeNative(
         "String",
         [](Interp& it, void*, const std::string&, const Args& a,
@@ -645,7 +645,7 @@ void Interp::InstallBuiltins() {
         });
     global_->props["String"] = stringCtor;
 
-    // Number（含 isNaN/isFinite）
+    
     JsValue numberCtor = MakeNative(
         "Number",
         [](Interp& it, void*, const std::string&, const Args& a,
@@ -677,7 +677,7 @@ void Interp::InstallBuiltins() {
     numberCtor.obj->props["NaN"] = JsValue::Num(NAN);
     global_->props["Number"] = numberCtor;
 
-    // Math
+    
     JsValue math = NewObject();
     math.obj->props["PI"] = JsValue::Num(3.14159265358979323846);
     math.obj->props["E"] = JsValue::Num(2.71828182845904523536);
@@ -751,7 +751,7 @@ void Interp::InstallBuiltins() {
         });
     AddGlobal("Math", math);
 
-    // JSON
+    
     JsValue json = NewObject();
     json.obj->props["parse"] = MakeNative(
         "parse",
@@ -781,8 +781,8 @@ void Interp::InstallBuiltins() {
         });
     AddGlobal("JSON", json);
 
-    // Date：new Date() 时把方法写到 this 上；Date.now()/Date.parse 是静态方法。
-    // dateProto 必须先建好，构造器要在实例上挂原型（没有原型链就取不到 getTime）。
+    
+    
     JsValue dateProto = NewObject();
     JsValue dateCtor = MakeNative(
         "Date",
@@ -793,7 +793,7 @@ void Interp::InstallBuiltins() {
             if (self.IsObjectLike()) {
                 self.obj->props["__ts"] = JsValue::Num(ms);
                 self.obj->proto = dateProto.obj;
-                *out = JsValue::Undef();  // new 会返回这个对象
+                *out = JsValue::Undef();  
                 return true;
             }
             *out = JsValue::Str("Date");
@@ -812,7 +812,7 @@ void Interp::InstallBuiltins() {
            const JsValue&, JsValue* out) -> bool {
             double ms = 0;
             std::string s = a.empty() ? "" : a[0].str;
-            // 只支持 "YYYY-MM-DD HH:MM:SS" 这类固定格式，够页面用
+            
             int Y = 0, M = 1, D = 1, h = 0, m = 0, sec = 0;
             if (sscanf(s.c_str(), "%d-%d-%d %d:%d:%d", &Y, &M, &D, &h, &m,
                        &sec) >= 3) {
@@ -896,7 +896,7 @@ void Interp::InstallBuiltins() {
     dateCtor.obj->props["prototype"] = dateProto;
     AddGlobal("Date", dateCtor);
 
-    // Error 及常见子类
+    
     auto makeErrorCtor = [&](const char* name) {
         std::string nm = name;
         JsValue ctor = MakeNative(
@@ -927,7 +927,7 @@ void Interp::InstallBuiltins() {
     AddGlobal("ReferenceError", makeErrorCtor("ReferenceError"));
     AddGlobal("SyntaxError", makeErrorCtor("SyntaxError"));
 
-    // console：日志直接进 stdout（--shot 诊断可见）；GUI 模式没有控制台，等价丢弃。
+    
     JsValue console = NewObject();
     auto logFn = [this](const char* level) {
         return MakeNative(
@@ -951,9 +951,9 @@ void Interp::InstallBuiltins() {
     console.obj->props["debug"] = logFn("debug");
     AddGlobal("console", console);
 
-    // globalThis / window 的 JS 别名（DOM 层会把 window 设成真正的宿主对象）
+    
     AddGlobal("globalThis", JsValue::Obj(global_));
     AddGlobal("self", JsValue::Obj(global_));
 }
 
-}  // namespace zb
+}  

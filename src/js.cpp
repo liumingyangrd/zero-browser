@@ -1,5 +1,5 @@
-// 自研 JavaScript 子集解释器：词法 / 语法 / 求值 / 内置对象。
-// 分层说明见 js.h 顶部注释；DOM 绑定在 js_dom.cpp，本文件不认识 DOM。
+
+
 
 #include "js.h"
 
@@ -17,7 +17,7 @@ namespace zb {
 
 namespace {
 
-// ------------------------------------------------------------------ 词法
+
 enum class Tok {
     End, Ident, Num, Str, Punct, Keyword,
 };
@@ -26,7 +26,7 @@ struct Token {
     Tok kind = Tok::End;
     std::string text;
     double num = 0;
-    bool nl_before = false;   // 之前是否有换行（ASI 与 return/break 语义要用）
+    bool nl_before = false;   
     size_t pos = 0;
 };
 
@@ -53,7 +53,7 @@ bool IsKeyword(const std::string& s) {
     return false;
 }
 
-// 最长匹配优先的多字符运算符表。顺序无关，取匹配到的最长者。
+
 const char* kPuncts[] = {
     ">>>=", "...", "===", "!==", "**=", "<<=", ">>=", ">>>", "=>", "==", "!=",
     "<=", ">=", "&&", "||", "??", "?.", "++", "--", "+=", "-=", "*=", "/=",
@@ -95,7 +95,7 @@ struct Lexer {
         }
     }
 
-    // 读一个 UTF-8 码点（非法字节按单字节处理，绝不越界）。
+    
     void Utf8Append(std::string* out) {
         unsigned char c = (unsigned char)src[i];
         size_t len = 1;
@@ -118,7 +118,7 @@ struct Lexer {
             return t;
         }
         unsigned char c = (unsigned char)src[i];
-        // 标识符 / 关键字
+        
         if (IsIdentStart(c)) {
             std::string id;
             while (i < src.size() && IsIdentPart((unsigned char)src[i])) {
@@ -129,7 +129,7 @@ struct Lexer {
             t.kind = IsKeyword(id) ? Tok::Keyword : Tok::Ident;
             return t;
         }
-        // 数字
+        
         if (IsDigit(c) || (c == '.' && i + 1 < src.size() &&
                            IsDigit((unsigned char)src[i + 1]))) {
             size_t start = i;
@@ -160,7 +160,7 @@ struct Lexer {
             t.kind = Tok::Num;
             return t;
         }
-        // 字符串
+        
         if (c == '"' || c == '\'') {
             char quote = (char)c;
             ++i;
@@ -192,7 +192,7 @@ struct Lexer {
                                 int cp = (int)strtol(
                                     src.substr(i + 1, 4).c_str(), nullptr, 16);
                                 i += 5;
-                                // 码点转 UTF-8（BMP 内足够；代理对暂不支持）
+                                
                                 if (cp < 0x80) {
                                     out.push_back((char)cp);
                                 } else if (cp < 0x800) {
@@ -215,12 +215,12 @@ struct Lexer {
                 }
                 Utf8Append(&out);
             }
-            if (i < src.size()) ++i;  // 收尾引号
+            if (i < src.size()) ++i;  
             t.kind = Tok::Str;
             t.text = out;
             return t;
         }
-        // 模板字符串：只支持无插值的静态模板（有 ${ 时报错，见 README）
+        
         if (c == '`') {
             ++i;
             std::string out;
@@ -247,7 +247,7 @@ struct Lexer {
             t.text = out;
             return t;
         }
-        // 运算符
+        
         for (const char* p : kPuncts) {
             size_t n = strlen(p);
             if (src.compare(i, n, p) == 0) {
@@ -257,13 +257,13 @@ struct Lexer {
                 return t;
             }
         }
-        // 不认识的字节：跳过，避免整段脚本因为一个字符而无法解析
+        
         ++i;
         return Next();
     }
 };
 
-// ------------------------------------------------------------------ 语法
+
 struct Parser {
     std::vector<Token> toks;
     size_t p = 0;
@@ -272,8 +272,8 @@ struct Parser {
 
     AstNode* New(AstKind k) { return interp->NewNode(k); }
 
-    // 越界保护：解析过程中 p 可能被推到末尾之后，直接 toks[p] 是 UB
-    //（错误信息里曾出现垃圾"当前词"，就是这里越界读出来的）。
+    
+    
     const Token& Cur() const { return toks[std::min(p, toks.size() - 1)]; }
     const Token& Peek(size_t n = 1) const {
         return toks[std::min(p + n, toks.size() - 1)];
@@ -300,7 +300,7 @@ struct Parser {
     }
     bool Fail(const std::string& m) {
         if (err.empty()) {
-            // 带上源码偏移与当前词：脚本一长，"第 N 个词法单元"没法直接定位。
+            
             char buf[160];
             snprintf(buf, sizeof(buf), " (第 %zu 个词法单元, 源码偏移 %zu, 当前词='%s')",
                      p, Cur().pos, Cur().text.c_str());
@@ -309,7 +309,7 @@ struct Parser {
         return false;
     }
 
-    // 自动分号插入的简化版：显式分号、换行、`}`、EOF 都算语句结束。
+    
     bool Semicolon() {
         if (EatPunct(";")) return true;
         if (Cur().kind == Tok::End || Cur().nl_before) return true;
@@ -476,7 +476,7 @@ struct Parser {
             Fail("期望 (");
             return nullptr;
         }
-        // for (var x in/of obj) 与 for (x of arr)
+        
         size_t save = p;
         bool is_decl = IsKw("var") || IsKw("let") || IsKw("const");
         int decl_kind = IsKw("var") ? 0 : (IsKw("let") ? 1 : 2);
@@ -487,7 +487,7 @@ struct Parser {
             if (Cur().kind == Tok::Ident) {
                 loop_var = Cur().text;
                 have_var = true;
-                ++p;  // 必须吃掉变量名，否则看不到后面的 in / of
+                ++p;  
             }
         } else if (Cur().kind == Tok::Ident) {
             loop_var = Cur().text;
@@ -559,7 +559,7 @@ struct Parser {
         return n;
     }
 
-    // for 的 init 位置：吃掉分号前的部分，但不吃分号。
+    
     AstNode* ParseVarNoSemi() {
         int kind = IsKw("var") ? 0 : (IsKw("let") ? 1 : 2);
         ++p;
@@ -632,7 +632,7 @@ struct Parser {
     AstNode* ParseReturn() {
         ++p;
         AstNode* n = New(AstKind::Return);
-        // return 后不能跨行：`return\n x` 要当成 return;
+        
         if (Cur().kind == Tok::End || Cur().nl_before || IsPunct(";") ||
             IsPunct("}")) {
             n->kids.push_back(nullptr);
@@ -712,7 +712,7 @@ struct Parser {
         n->kids.push_back(disc);
         while (!IsPunct("}") && Cur().kind != Tok::End) {
             AstNode* c = New(AstKind::Empty);
-            c->kind = AstKind::ExprStmt;  // 复用：kids[0] = test 或 nullptr
+            c->kind = AstKind::ExprStmt;  
             if (EatKw("case")) {
                 AstNode* t = ParseExpression();
                 if (!t) return nullptr;
@@ -744,7 +744,7 @@ struct Parser {
         return n;
     }
 
-    // ------------------------------------------------------------- 表达式
+    
     AstNode* ParseExpression() {
         AstNode* first = ParseAssign();
         if (!first) return nullptr;
@@ -760,7 +760,7 @@ struct Parser {
     }
 
     AstNode* ParseAssign() {
-        // 箭头函数：x => ... / (a, b) => ...
+        
         if (Cur().kind == Tok::Ident && Peek().kind == Tok::Punct &&
             Peek().text == "=>") {
             AstNode* fn = New(AstKind::Function);
@@ -920,7 +920,7 @@ struct Parser {
                 if (!e) return nullptr;
                 AstNode* n = New(AstKind::Update);
                 n->str = op;
-                n->computed = true;  // 前缀
+                n->computed = true;  
                 n->kids.push_back(e);
                 return n;
             }
@@ -947,7 +947,7 @@ struct Parser {
             (Cur().text == "++" || Cur().text == "--")) {
             AstNode* n = New(AstKind::Update);
             n->str = Cur().text;
-            n->computed = false;  // 后缀
+            n->computed = false;  
             n->kids.push_back(e);
             ++p;
             return n;
@@ -1141,7 +1141,7 @@ struct Parser {
                             n->names.push_back("");
                             n->kids.push_back(k);
                             n->flags.push_back(1);
-                            // 值
+                            
                             if (!EatPunct(":")) {
                                 Fail("期望 :");
                                 return nullptr;
@@ -1157,7 +1157,7 @@ struct Parser {
                             Fail("期望属性名");
                             return nullptr;
                         }
-                        // 简写方法 fn() {}
+                        
                         if (IsPunct("(")) {
                             AstNode* fn = New(AstKind::Function);
                             fn->str = key;
@@ -1198,7 +1198,7 @@ struct Parser {
     }
 };
 
-}  // namespace
+}  
 
 AstNode* Interp::NewNode(AstKind k) {
     arena_.push_back(std::unique_ptr<AstNode>(new AstNode()));
@@ -1228,6 +1228,6 @@ const AstNode* Interp::Parse(const std::string& code, std::string* err) {
     return prog;
 }
 
-// ==== 求值器与内置对象在 js_eval.cpp（同一 Interp 类的另一部分实现）====
 
-}  // namespace zb
+
+}  

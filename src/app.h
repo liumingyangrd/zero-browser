@@ -46,15 +46,15 @@ struct TabState {
     int history_index = -1;
     int pending_seq = -1;
     bool loading = false;
-    // 正在加载的目标地址。加载期间地址栏与状态栏显示它，而不是等加载完成才更新
-    // 的 url —— 否则按下回车后地址栏会立刻弹回上一个页面（实测的 bug）。
+    
+    
     std::string pending_url;
-    // 页面表单焦点：表单输入与地址栏互斥，键盘二选一。
+    
     Node* field = nullptr;
     int field_caret = 0;
     bool field_focused = false;
-    // 上一次完成布局时用的视口尺寸。视口没变就不必重排 —— 切标签原来会无条件
-    // 整页重排，实测切到某评测站首页要冻 1.9 秒（见 EnsureLayout）。
+    
+    
     int layout_w = 0;
     int layout_h = 0;
 };
@@ -62,13 +62,13 @@ struct TabState {
 class BrowserApp {
 public:
     BrowserApp(HINSTANCE inst);
-    // visible=false 时不显示窗口，仅用于 --shot 无窗口渲染诊断。
+    
     bool CreateMainWindow(bool visible = true, int width = 1180,
                           int height = 820);
     int Run();
 
-    // 非交互式截图诊断（--shot）。复用真实 Render / OnLButtonDown 代码路径，
-    // 但不依赖桌面窗口截图，所以在无桌面/受限会话里也能取证。
+    
+    
     struct ShotOptions {
         std::string url;
         std::string out;
@@ -77,47 +77,47 @@ public:
         int height = 820;
         int wait_ms = 6000;
         int after_ms = 1500;
-        // 可选：导航后先把页面滚动到指定 y（文档坐标），用于验证 fixed 悬浮。
+        
         int scroll = 0;
-        // --shot 的交互脚本：按命令行给出的顺序依次执行。
-        // 表单回归要的正是「点控件 → 输入 → 回车/点提交」这种有先后的多步动作，
-        // 所以 --click / --type-field / --press 统一进同一个有序列表，而不是
-        // 分成几个各管一段的字段（那样就没法表达"点它、再打字"）。
+        
+        
+        
+        
         struct Action {
             enum class Kind { Click, TypeField, Press };
             Kind kind = Kind::Click;
             int x = 0;
             int y = 0;
-            std::string text;  // TypeField 的文本 / Press 的键名
+            std::string text;  
         };
         std::vector<Action> actions;
-        // 地址栏输入测试：--set-address 设置内容，--focus-address 聚焦，
-        // --type 逐字符走真实的 OnChar 路径（用于回归「输入即崩溃」这类问题）。
-        // 注意 --type 只服务地址栏：它会强制把焦点交给地址栏，测不了页面控件。
+        
+        
+        
         std::string set_address;
         bool focus_address = false;
         std::string type_text;
-        // 按 VK_BACK 走真实的 OnKey 路径，N 次（回归「按码点退格」）。
+        
         int backspace = 0;
-        // 地址栏剪贴板回归：--clipboard 先把文本放进系统剪贴板，
-        // --paste N 走真实的 Ctrl+V 路径，--select-all / --copy 同理。
+        
+        
         std::string clipboard;
         int paste = 0;
         bool select_all = false;
         bool copy = false;
         bool cut = false;
-        // 可重复的 --hotkey NAME：走真实 OnKeyEx 路径验证快捷键。
-        // 支持 ctrl+l / ctrl+r / ctrl+a / ctrl+c / ctrl+v / ctrl+x / f5 /
-        // escape / enter（无窗口会话没有键盘，GetKeyState 恒为 0，
-        // 只能这样把修饰键显式喂进去）。
+        
+        
+        
+        
         std::vector<std::string> hotkeys;
         bool dump_boxes = false;
-        // ---- 设置与界面语言的无窗口回归 ----
-        // --set-lang zh|en|auto：本次会话直接切语言（不写盘）。
+        
+        
         std::string set_lang;
-        // --save-settings：把当前设置写进配置文件（验证持久化）。
+        
         bool save_settings = false;
-        // --dump-settings：打印语言设置、实际生效语言与配置文件路径。
+        
         bool dump_settings = false;
     };
     bool HeadlessShot(const ShotOptions& opt);
@@ -145,15 +145,15 @@ private:
     void OnRButtonUp(int x, int y);
     void OnMouseWheel(int delta);
     void OnKey(UINT key);
-    // 修饰键显式传入：无窗口测试（--shot）里没有真实键盘，
-    // GetKeyState 恒为 0，所以 Ctrl+V 这类快捷键必须能带参调用同一条路径。
+    
+    
     void OnKeyEx(UINT key, bool ctrl, bool shift);
     void OnChar(wchar_t ch);
     void OnTimer(UINT_PTR id);
-    // JS 定时器心跳：setTimeout / setInterval / requestAnimationFrame。
+    
     void OnJsTick();
 
-    // 地址栏编辑：选择区、剪贴板、右键菜单。
+    
     bool AddressHasSelection() const;
     size_t AddressSelBegin() const;
     size_t AddressSelEnd() const;
@@ -165,7 +165,7 @@ private:
     void AddressCopyToClipboard();
     void AddressCutToClipboard();
     void AddressPasteFromClipboard();
-    // 按点击/拖动位置算插入点下标（绘制与命中必须同源）。
+    
     size_t AddressCaretFromX(int x) const;
     void ShowAddressMenu(int x, int y);
 
@@ -178,8 +178,8 @@ private:
     HitTest HitTestPoint(int x, int y) const;
     void RelayoutActive();
     void RelayoutTab(int index);
-    // 需要时才重排：视口尺寸与上次布局时相同就直接复用，返回是否真的排了。
-    // 切标签 / 关标签 / 新建标签走这条；页面内容变化仍走 RelayoutTab 强制重排。
+    
+    
     bool EnsureLayout(int index);
     void EnsureLayoutActive();
     void SyncAddress();
@@ -191,32 +191,32 @@ private:
                             images,
                         const std::map<std::string, std::string>& scripts);
     void OnNavigationDone(LPARAM l);
-    // 第二阶段：图片与外链脚本取完后的回执（渐进渲染，见 StartNavigate）。
+    
     void OnAssetsDone(LPARAM l);
-    // ---- 页面表单交互（登录这类流程的地基）
-    // 取/写控件文本：input 用 value 属性，textarea 用文本子节点，select 用当前选项。
+    
+    
     std::string FieldText(const Node* n) const;
     void SetFieldText(Node* n, const std::string& v);
-    // 点击时把焦点给控件（nullptr 表示取消焦点）
+    
     void FocusField(Node* n, int click_x);
-    // 提交控件所在的 <form>：GET 拼查询串，POST 走请求体。
-    // activated 是"被点/被回车激活的提交按钮"（没有就传 nullptr），
-    // 它的 name=value 按 HTML 规范要一并带上（只有名字非空时）。
+    
+    
+    
     bool SubmitFieldForm(Node* n, Node* activated = nullptr);
-    // Tab / Shift+Tab：按 DOM 顺序在可编辑控件之间移动焦点，返回是否移动了。
+    
     bool AdvanceFieldFocus(bool backward);
-    // 诊断输出：把当前页面表单焦点的状态打成一行（--shot 回归靠它取证）。
+    
     void LogFieldState(const char* tag) const;
-    // 提交用的待发请求体（NavigateTo 之前设置，StartNavigate 取用后清空）
+    
     std::string post_pending_body_;
     std::string post_pending_type_;
 
     std::string CurrentUrl() const;
-    // 界面显示用的地址：有正在加载的目标就显示它，否则显示当前页面地址。
+    
     std::string DisplayUrl() const;
     TabState& ActiveTab();
     const TabState& ActiveTab() const;
-    // 标签宽度只在标签数量/窗口宽度变化时变，绘制与命中测试必须同源。
+    
     int TabWidth() const {
         int n = (int)tabs_.size();
         return std::max(70, std::min(190, (width_ - 70) / std::max(1, n)));
@@ -234,15 +234,15 @@ private:
     bool address_focused_ = false;
     int caret_ = 0;
     bool caret_visible_ = true;
-    // 选择区锚点（字节下标）：<0 表示没有选择。选择区为 [min(anchor,caret),
-    // max(anchor,caret))，与插入点共用同一套码点边界规则。
+    
+    
     int sel_anchor_ = -1;
     bool mouse_selecting_ = false;
     int drag_anchor_ = -1;
     int drag_down_x_ = 0;
     UINT_PTR caret_timer_ = 1;
     UINT_PTR video_timer_ = 2;
-    // JS 定时器心跳：60ms 一跳，页面没有脚本时只是一次分支判断。
+    
     UINT_PTR js_timer_ = 3;
     int nav_seq_ = 0;
 
@@ -253,4 +253,4 @@ private:
     GdiCanvas* measure_canvas_ = nullptr;
 };
 
-}  // namespace zb
+}  

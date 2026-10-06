@@ -17,7 +17,7 @@ struct ComScope {
     ~ComScope() { CoUninitialize(); }
 };
 
-}  // namespace
+}  
 
 std::shared_ptr<Image> DecodeImage(const uint8_t* data, size_t len) {
     if (!data || len == 0 || len > (size_t)INT32_MAX) return nullptr;
@@ -57,7 +57,7 @@ std::shared_ptr<Image> DecodeImage(const uint8_t* data, size_t len) {
                                    (UINT)out->bgra.size(), out->bgra.data());
     }
     if (SUCCEEDED(hr)) {
-        // 转成 premultiplied alpha，GDI AlphaBlend 才能正确合成透明 PNG。
+        
         for (size_t i = 0; i + 3 < out->bgra.size(); i += 4) {
             uint8_t a = out->bgra[i + 3];
             if (a == 255) continue;
@@ -77,4 +77,4 @@ std::shared_ptr<Image> DecodeImage(const uint8_t* data, size_t len) {
     return out;
 }
 
-}  // namespace zb
+}  

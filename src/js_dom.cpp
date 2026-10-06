@@ -1,5 +1,5 @@
-// DOM 绑定层：把本项目的 Node / Box 暴露成 JavaScript 能操作的对象，
-// 并实现事件派发与定时器。本文件只认 dom.h / layout.h / engine.h，不碰 Win32。
+
+
 
 #include "js_dom.h"
 
@@ -30,7 +30,7 @@ double NowMs() {
         .count();
 }
 
-// JS 的驼峰属性名 -> CSS 属性名：backgroundColor -> background-color
+
 std::string CamelToKebab(const std::string& s) {
     if (s == "cssText") return "cssText";
     if (s == "float" || s == "cssFloat") return "float";
@@ -46,7 +46,7 @@ std::string CamelToKebab(const std::string& s) {
     return out;
 }
 
-// 节点类型名（tagName 用大写，与浏览器一致）
+
 std::string TagUpper(const Node* n) {
     if (!n) return "";
     if (n->type == NodeType::Text) return "#text";
@@ -58,7 +58,7 @@ std::string TagUpper(const Node* n) {
     return t;
 }
 
-// 转义 innerHTML 输出中的文本
+
 void EscapeHtml(const std::string& s, std::string* out) {
     for (char c : s) {
         switch (c) {
@@ -103,13 +103,13 @@ std::string SerializeNode(const Node* n) {
     return out + "</" + n->tag + ">";
 }
 
-// 取第 i 个实参（越界给 undefined）。做成自由函数而不是局部 lambda：
-// 宿主属性里的回调 lambda 捕获不到外层函数的局部 lambda（编译期就会报 not captured）。
+
+
 JsValue ArgOf(const std::vector<JsValue>& a, size_t i) {
     return i < a.size() ? a[i] : JsValue::Undef();
 }
 
-// 宿主指针 -> Node*：kind 决定它是不是节点。
+
 Node* NodeOfHost(void* host, const std::string& kind) {
     if (kind == "element" || kind == "text" || kind == "style" ||
         kind == "documentnode") {
@@ -118,9 +118,9 @@ Node* NodeOfHost(void* host, const std::string& kind) {
     return nullptr;
 }
 
-// el.style.foo = 'v' 的实现：按 CSS 声明合并进 style 属性。
-// 采用"改属性"而不是另存一份内联样式，是为了让引擎现有的
-// ComputeStyleCss -> ApplyStyleAttr 路径直接生效（改完置脏 -> 重新布局）。
+
+
+
 void SetStyleDecl(Node* node, const std::string& prop, const std::string& value) {
     if (!node || prop.empty()) return;
     std::string attr = node->Attr("style");
@@ -141,7 +141,7 @@ void SetStyleDecl(Node* node, const std::string& prop, const std::string& value)
     node->attrs["style"] = joined;
 }
 
-// document.write 的近似：把片段追加到目标节点末尾（真机是插在解析位置）。
+
 void AppendHtml(Node* target, const std::string& html) {
     if (!target || html.empty()) return;
     std::vector<std::unique_ptr<Node>> kids = ParseHtmlFragment(html);
@@ -151,9 +151,9 @@ void AppendHtml(Node* target, const std::string& html) {
     }
 }
 
-}  // namespace
+}  
 
-// ------------------------------------------------------------------ 生命周期
+
 JsRuntime::JsRuntime(Page* page, const std::string& url)
     : page_(page), interp_(this), url_(url) {
     interp_.SetBridge(this);
@@ -167,7 +167,7 @@ Node* JsRuntime::DocumentNode() const {
     if (!page_) return nullptr;
     const Box* root = page_->RootBox();
     (void)root;
-    // Page 没有直接暴露 root_ 节点，这里走 layout 根盒子的 node（就是文档节点）。
+    
     if (page_->RootBox() && page_->RootBox()->node) return page_->RootBox()->node;
     return nullptr;
 }
@@ -197,7 +197,7 @@ const Box* JsRuntime::BoxFor(const Node* node) const {
     return w.Find(page_->RootBox());
 }
 
-// ------------------------------------------------------------------ DOM 工具
+
 JsValue JsRuntime::Wrap(Node* node) {
     if (!node) return JsValue::Null();
     auto it = wrappers_.find(node);
@@ -221,8 +221,8 @@ Node* JsRuntime::Unwrap(const JsValue& v) const {
 
 bool JsRuntime::IsElement(const JsValue& v) const { return Unwrap(v) != nullptr; }
 
-// 把节点从原父节点摘下来，所有权转入 detached_：
-// JS 可能还持有引用，直接 delete 会留下悬垂指针。
+
+
 std::unique_ptr<Node> JsRuntime::TakeOwnership(Node* node) {
     if (!node) return nullptr;
     for (size_t i = 0; i < detached_.size(); ++i) {
@@ -250,7 +250,7 @@ void JsRuntime::InsertAt(Node* parent, Node* child, int index) {
     if (!parent || !child) return;
     std::unique_ptr<Node> owned = TakeOwnership(child);
     if (!owned) {
-        // 既不在 detached_ 也不在树上：说明是刚 new 出来还没托管的节点
+        
         owned.reset(child);
     }
     child->parent = parent;
@@ -286,7 +286,7 @@ std::string JsRuntime::InnerHtml(const Node* node) const {
 
 void JsRuntime::SetInnerHtml(Node* node, const std::string& html) {
     if (!node) return;
-    // 旧子节点不能销毁（JS 可能仍持有），挪进 detached_。
+    
     while (!node->children.empty()) {
         std::unique_ptr<Node> owned = std::move(node->children.back());
         node->children.pop_back();
@@ -297,7 +297,7 @@ void JsRuntime::SetInnerHtml(Node* node, const std::string& html) {
         MarkDirty();
         return;
     }
-    // 片段解析：不会额外套 html/body 外壳
+    
     std::vector<std::unique_ptr<Node>> kids = ParseHtmlFragment(html);
     for (auto& k : kids) {
         k->parent = node;
@@ -338,8 +338,8 @@ void JsRuntime::CollectByClass(const Node* root, const std::string& cls,
     for (const auto& c : root->children) CollectByClass(c.get(), cls, out);
 }
 
-// 选择器：复用引擎的 SelectorPart / MatchesRule，支持
-// #id / .class / tag / 后代 / 逗号分组（逗号分组按"任一命中"处理）。
+
+
 void JsRuntime::CollectBySelector(const Node* root, const std::string& sel,
                                   std::vector<Node*>* out) const {
     if (!root || !out || sel.empty()) return;
@@ -347,7 +347,7 @@ void JsRuntime::CollectBySelector(const Node* root, const std::string& sel,
     auto matchesOne = [&](const Node* n, const std::string& one) {
         std::string s = Trim(one);
         if (s.empty()) return false;
-        // 复用 CSS 引擎的选择器匹配：把选择器解析成一条规则链。
+        
         std::vector<SelectorPart> chain;
         std::vector<std::string> parts = SplitStr(s, ' ');
         for (const std::string& p : parts) {
@@ -421,18 +421,18 @@ void JsRuntime::CollectBySelector(const Node* root, const std::string& sel,
         CssRule rule;
         rule.parts.push_back(chain);
         if (MatchesRule(n, rule)) return true;
-        // MatchesRule 要求整条后代链都匹配；`div p` 这类在只给了末端节点时
-        // 会失败，这里退化成"最右一段匹配即可"，保证 #id/.class/tag 一定工作。
+        
+        
         return PartMatches((Node*)n, chain.back());
     };
-    // 深度优先收集
+    
     std::vector<const Node*> stack;
     stack.push_back(root);
     while (!stack.empty()) {
         const Node* n = stack.back();
         stack.pop_back();
         for (const auto& c : n->children) stack.push_back(c.get());
-        if (n == root) continue;  // querySelector 不返回自身（与浏览器一致）
+        if (n == root) continue;  
         if (n->type != NodeType::Element) continue;
         for (const std::string& g : groups) {
             if (matchesOne(n, g)) {
@@ -441,16 +441,16 @@ void JsRuntime::CollectBySelector(const Node* root, const std::string& sel,
             }
         }
     }
-    // 深度优先栈会打乱顺序，这里按文档顺序重排一次
+    
     std::vector<Node*> ordered;
     for (Node* n : *out) ordered.push_back(n);
     std::sort(ordered.begin(), ordered.end(), [](Node* a, Node* b) {
-        return a < b;  // 同一次解析里节点地址递增，近似文档顺序
+        return a < b;  
     });
     *out = ordered;
 }
 
-// ------------------------------------------------------------------ 宿主对象
+
 JsValue JsRuntime::MakeDocumentObject() {
     return interp_.MakeHost(nullptr, "document", "#document");
 }
@@ -459,7 +459,7 @@ JsValue JsRuntime::MakeLocationObject() {
     return interp_.MakeHost(nullptr, "location", "location");
 }
 
-// ------------------------------------------------------------------ 属性访问
+
 bool JsRuntime::HostGet(void* host, const std::string& kind,
                         const std::string& key, JsValue* out) {
     auto native = [&](const char* name, NativeFn fn) {
@@ -468,7 +468,7 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
     };
 
     if (kind == "window") {
-        // window 上的未知属性回退到全局对象（window.foo === foo）
+        
         if (key == "document") {
             if (document_obj_.IsNullish()) document_obj_ = MakeDocumentObject();
             *out = document_obj_;
@@ -743,7 +743,7 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
                                  const std::vector<JsValue>& a, const JsValue&,
                                  JsValue* o) -> bool {
                               Node* n = MakeElement(it.ToString(ArgOf(a, 0)));
-                              // 立刻托管：JS 拿到引用后可能过一会儿才挂进树
+                              
                               detached_.push_back(std::unique_ptr<Node>(n));
                               *o = Wrap(n);
                               return true;
@@ -771,7 +771,7 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
                               if (nl) html += "\n";
                               Node* target = BodyNode();
                               if (target) {
-                                  // 近似实现：追加到 body 末尾（真机是插在解析位置）
+                                  
                                   AppendHtml(target, html);
                                   MarkDirty();
                               }
@@ -809,11 +809,11 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
         return false;
     }
 
-    // ---- 元素 / 文本节点
+    
     Node* node = NodeOfHost(host, kind);
     if (!node) return false;
     if (kind == "style") {
-        // el.style.color -> 读 style 属性里的声明
+        
         std::string attr = node->Attr("style");
         std::string want = CamelToKebab(key);
         for (const std::string& d : SplitStr(attr, ';')) {
@@ -874,7 +874,7 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
         return true;
     }
     if (key == "value") {
-        // input/textarea/select 的值：优先 value 属性，其次取文本
+        
         std::string v = node->Attr("value");
         if (v.empty() && node->tag == "textarea") v = TextContent(node);
         *out = JsValue::Str(v);
@@ -956,10 +956,10 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
         return true;
     }
     if (key == "classList") {
-        // 注意：classList 是**属性**而不是方法，必须立刻把列表对象交出去。
-        // 早先写成 return native("classList", ...)，于是 el.classList 拿到的是
-        // 一个函数，紧接着的 .add/.remove 全是 undefined（实测报
-        // "undefined 不是函数"，整段脚本第一步就挂）。
+        
+        
+        
+        
         JsValue list = interp_.NewObject();
                           auto setClass = [this, node](const std::string& cls,
                                                        bool add) {
@@ -1111,7 +1111,7 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
                               *o = ArgOf(a, 0);
                               return true;
                           }
-                          // replaceChild(new, old)
+                          
                           Node* old = Unwrap(ArgOf(a, 1));
                           if (old) {
                               int index = -1;
@@ -1229,7 +1229,7 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
                           return true;
                       });
     }
-    // 普通属性回退到 DOM 属性表
+    
     if (node->HasAttr(key)) {
         *out = JsValue::Str(node->Attr(key));
         return true;
@@ -1240,7 +1240,7 @@ bool JsRuntime::HostGet(void* host, const std::string& kind,
 bool JsRuntime::HostSet(void* host, const std::string& kind,
                         const std::string& key, const JsValue& v) {
     if (kind == "window") {
-        // window.foo = 1 等价于全局 foo = 1
+        
         interp_.AddGlobal(key, v);
         return true;
     }
@@ -1265,7 +1265,7 @@ bool JsRuntime::HostSet(void* host, const std::string& kind,
             return true;
         }
         if (key == "cookie") {
-            return true;  // 只读（README 已列为限制）
+            return true;  
         }
         return false;
     }
@@ -1337,7 +1337,7 @@ bool JsRuntime::HostSet(void* host, const std::string& kind,
         node->attrs[key] = interp_.ToString(v);
         return true;
     }
-    // 其它属性写进属性表（与浏览器的 attribute 反射一致）
+    
     node->attrs[key] = interp_.ToString(v);
     MarkDirty();
     return true;
@@ -1355,7 +1355,7 @@ std::string JsRuntime::HostToString(void* host, const std::string& kind) {
     return "[object HTML" + TagUpper(node) + "Element]";
 }
 
-// ------------------------------------------------------------------ 脚本
+
 void JsRuntime::AddScript(const std::string& code, const std::string& name) {
     if (Trim(code).empty()) return;
     pending_.push_back({name, code});
@@ -1381,7 +1381,7 @@ bool JsRuntime::RunPendingScripts() {
 }
 
 bool JsRuntime::EvalHandlerSource(const std::string& src, JsValue* out) {
-    // 内联属性（onclick="..."）里是语句序列，包成函数再求值。
+    
     std::string code = "(function(event){" + src + "\n})";
     if (!interp_.EvalExpression(code, out)) {
         error_ = interp_.error();
@@ -1408,7 +1408,7 @@ size_t JsRuntime::ListenerCount() const {
     return n;
 }
 
-// ------------------------------------------------------------------ 事件
+
 JsRuntime::EventData* JsRuntime::NewEvent(const std::string& type,
                                           const JsValue& target) {
     auto ev = std::make_shared<EventData>();
@@ -1416,7 +1416,7 @@ JsRuntime::EventData* JsRuntime::NewEvent(const std::string& type,
     ev->target = target;
     ev->current = target;
     live_events_.push_back(ev);
-    // 只保留最近 32 个事件对象：一轮派发结束后没人会再用旧的
+    
     if (live_events_.size() > 32) live_events_.erase(live_events_.begin());
     return live_events_.back().get();
 }
@@ -1453,7 +1453,7 @@ bool JsRuntime::FireOnNode(Node* node, const std::string& type, EventData* ev) {
     bool ran = false;
     JsValue target = Wrap(node);
 
-    // 1) addEventListener 注册的处理器
+    
     auto it = listeners_.find(node);
     if (it != listeners_.end()) {
         std::vector<JsValue> handlers;
@@ -1473,7 +1473,7 @@ bool JsRuntime::FireOnNode(Node* node, const std::string& type, EventData* ev) {
         }
     }
 
-    // 2) 内联属性 onclick="..."（做了缓存，避免每次点击都重新解析）
+    
     std::string attr = "on" + Lower(type);
     if (node->HasAttr(attr)) {
         JsValue fn;
@@ -1508,7 +1508,7 @@ bool JsRuntime::DispatchEvent(const std::string& type, const Node* target,
     Node* node = const_cast<Node*>(target);
     EventData* ev = NewEvent(type, Wrap(node));
     bool ran = false;
-    // 从目标逐级冒泡到根
+    
     for (Node* n = node; n; n = n->parent) {
         if (FireOnNode(n, type, ev)) ran = true;
         if (ev->stopped || !bubbles) break;
@@ -1540,7 +1540,7 @@ bool JsRuntime::DispatchEvent(const std::string& type, const Node* target,
     return ran;
 }
 
-// 解析相对 URL（够用即可：绝对 / 站内绝对 / 相对）
+
 namespace {
 std::string ResolveHref(const std::string& base, const std::string& href) {
     std::string h = Trim(href);
@@ -1560,14 +1560,14 @@ std::string ResolveHref(const std::string& base, const std::string& href) {
     else dir = origin + "/";
     return dir + h;
 }
-}  // namespace
+}  
 
 bool JsRuntime::DispatchClick(const Node* target, int x, int y) {
     if (!target) return false;
     EventData* ev = NewEvent("click", Wrap(const_cast<Node*>(target)));
     ev->client_x = x;
     ev->client_y = y;
-    // 复用 DispatchEvent 的冒泡逻辑，但坐标要带过去
+    
     bool ran = false;
     for (Node* n = const_cast<Node*>(target); n; n = n->parent) {
         if (FireOnNode(n, "click", ev)) ran = true;
@@ -1585,7 +1585,7 @@ bool JsRuntime::DispatchClick(const Node* target, int x, int y) {
             ran = true;
         }
     }
-    // 默认动作：点到了 <a href> 就导航（除非处理器 preventDefault）
+    
     if (!ev->prevented) {
         for (Node* n = const_cast<Node*>(target); n; n = n->parent) {
             if (n->type == NodeType::Element && n->tag == "a" &&
@@ -1623,11 +1623,11 @@ void JsRuntime::DispatchLoad() {
             error_ = interp_.error();
         }
     }
-    // body onload="..."
+    
     if (Node* body = BodyNode()) FireOnNode(body, "load", ev);
 }
 
-// ------------------------------------------------------------------ 定时器
+
 bool JsRuntime::RunTimers() {
     double now = NowMs();
     std::vector<int> due;
@@ -1673,7 +1673,7 @@ int JsRuntime::NextTimerDelayMs() const {
     return best < 0 ? -1 : (int)best;
 }
 
-// ------------------------------------------------------------------ 全局安装
+
 void JsRuntime::InstallGlobals() {
     window_obj_ = MakeWindowObject();
     document_obj_ = MakeDocumentObject();
@@ -1685,7 +1685,7 @@ void JsRuntime::InstallGlobals() {
         JsValue o = interp_.NewObject();
         o.obj->props["userAgent"] =
             JsValue::Str("ZeroBrowser/0.1.6 (self-built engine)");
-        // 跟着界面语言走：脚本常按它决定取什么语言的接口。
+        
         o.obj->props["language"] =
             JsValue::Str(UiIsEnglish() ? "en-US" : "zh-CN");
         return o;
@@ -1701,7 +1701,7 @@ void JsRuntime::InstallGlobals() {
                                    [this](Interp& it, void*, const std::string&,
                                           const std::vector<JsValue>& a,
                                           const JsValue&, JsValue* out) -> bool {
-                                       // 没有模态框：写进脚本日志（诊断可见）
+                                       
                                        script_log_.push_back(
                                            "[js] alert: " + it.ToString(a.empty()
                                                                             ? JsValue::Undef()
@@ -1734,7 +1734,7 @@ void JsRuntime::InstallGlobals() {
                           for (size_t i = 2; i < a.size(); ++i) {
                               t.args.push_back(a[i]);
                           }
-                          // 上限保护：页面狂开定时器不能把内存吃光
+                          
                           if (timers_.size() < 512) timers_.push_back(t);
                           *out = JsValue::Num((double)t.id);
                           return true;
@@ -1779,4 +1779,4 @@ void JsRuntime::InstallGlobals() {
                            }));
 }
 
-}  // namespace zb
+}  

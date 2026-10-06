@@ -27,15 +27,15 @@ void GdiCanvas::Init(int width, int height) {
     }
     width_ = width;
     height_ = height;
-    // 用 32 位 DIB 段，而不是 CreateCompatibleBitmap。
-    // CreateCompatibleBitmap 的位深取决于目标 DC：如果 DC 来自
-    // CreateCompatibleDC(nullptr)（默认选中的是 1x1 单色位图），拿到的是 1bpp
-    // 单色位图，彩色页面和视频帧会被整体抖动成黑白。DIB 段可以保证画布始终是
-    // 32 位彩色，让渲染结果与创建画布时用的 DC 无关。
+    
+    
+    
+    
+    
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth = width;
-    info.bmiHeader.biHeight = -height;  // top-down
+    info.bmiHeader.biHeight = -height;  
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB;
@@ -98,8 +98,8 @@ HFONT GdiCanvas::FontFor(int font_size, bool bold, bool italic,
     int w = weight > 0 ? weight : (bold ? FW_BOLD : FW_NORMAL);
     std::wstring fam = family.empty() ? std::wstring(L"Segoe UI")
                                       : Utf8ToWide(family);
-    // CSS 的 font-family 可能给出本机没有的字体（如 -apple-system、PingFang SC），
-    // 先探测是否存在，不存在就回退到 Segoe UI，避免 GDI 静默替换成难看的字形。
+    
+    
     if (!fam.empty() && fam != L"Segoe UI") {
         HDC screen = CreateCompatibleDC(nullptr);
         LOGFONTW probe{};
@@ -119,7 +119,7 @@ HFONT GdiCanvas::FontFor(int font_size, bool bold, bool italic,
         bool usable = !got.empty() &&
                       _wcsicmp(got.c_str(), fam.c_str()) == 0;
         if (!usable) {
-            // 通用族名交给 GDI 自己挑；未知字体名回退 Segoe UI
+            
             std::string lf = family;
             for (char& c : lf) c = (char)std::tolower((unsigned char)c);
             if (lf == "sans-serif" || lf == "system-ui" || lf == "serif" ||
@@ -131,9 +131,9 @@ HFONT GdiCanvas::FontFor(int font_size, bool bold, bool italic,
         }
     }
     HFONT font = CreateFontW(
-        // CSS 的 font-size 是**像素**，不是点。之前按 72 DPI 折算成 21px 的 em，
-        // 文字整体比 Chromium 大约 30%，行高也随之偏大。这里按 96 DPI 折算，
-        // 在标准 DPI 下就是 -font_size，字号与浏览器一致。
+        
+        
+        
         -MulDiv(font_size, GetDeviceCaps(dc_, LOGPIXELSY), 96), 0, 0,
         italic ? 10 : 0, w, italic ? TRUE : FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -146,9 +146,9 @@ void GdiCanvas::DrawText(const std::string& utf8, int x, int y,
                          int font_size, uint32_t rgb, bool bold,
                          bool italic, bool underline, const std::string& family,
                          int weight) {
-    // 字体缓存必须把 italic / family / weight 算进 key：斜体和正体是不同的字型，
-    // 之前只用 (size, bold) 做 key，先画正体再画斜体会复用正体字体，
-    // 结果 <i>/<em> 全部渲染成正体。
+    
+    
+    
     HFONT font = FontFor(font_size, bold, italic, family, weight);
     HFONT old = (HFONT)SelectObject(dc_, font);
     COLORREF old_color = SetTextColor(dc_, RGB((rgb >> 16) & 255,
@@ -188,8 +188,8 @@ void GdiCanvas::FillRectAlpha(int x, int y, int w, int h, uint32_t rgb,
         return;
     }
     if (alpha == 0) return;
-    // 用 1x1 的 32 位 DIB 做源，AlphaBlend 拉伸成目标矩形。
-    // AC_SRC_ALPHA + 预乘：这里直接把颜色按 alpha 预乘。
+    
+    
     HDC mem = CreateCompatibleDC(dc_);
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -268,10 +268,10 @@ void GdiCanvas::StrokeLine(int x1, int y1, int x2, int y2, uint32_t rgb,
 
 void GdiCanvas::StrokeArc(const Rect& rc, int start, int sweep, uint32_t rgb,
                           int width) {
-    // 原来的实现忽略了 start/sweep 直接 Ellipse()，而调用方按
-    // {left,top,right,bottom} 传参，于是画出的是 94x67 的巨型椭圆，
-    // 溢出到地址栏上。这里按 {x,y,w,h} 外接矩形画真正的圆弧：
-    // 用折线逼近（角度约定：0° 指向右、逆时针为正、y 轴向上）。
+    
+    
+    
+    
     int rx = rc.w / 2;
     int ry = rc.h / 2;
     if (rx <= 0 || ry <= 0 || sweep == 0) return;
@@ -312,13 +312,13 @@ void GdiCanvas::DrawImage(const uint8_t* bgra, int src_w, int src_h, int dst_x,
                           int dst_y, int dst_w, int dst_h) {
     if (!bgra || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0) return;
 
-    // 用 AlphaBlend 合成，支持透明 PNG。传入的 BGRA 需要是 premultiplied；
-    // 图片解码时已做 premultiply，视频帧都是不透明像素，同样兼容。
+    
+    
     HDC mem = CreateCompatibleDC(dc_);
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth = src_w;
-    info.bmiHeader.biHeight = -src_h;  // top-down
+    info.bmiHeader.biHeight = -src_h;  
     info.bmiHeader.biPlanes = 1;
     info.bmiHeader.biBitCount = 32;
     info.bmiHeader.biCompression = BI_RGB;
@@ -331,8 +331,8 @@ void GdiCanvas::DrawImage(const uint8_t* bgra, int src_w, int src_h, int dst_x,
     }
     std::memcpy(bits, bgra, (size_t)src_w * src_h * 4);
     HGDIOBJ old = SelectObject(mem, bmp);
-    // 缩小用 HALFTONE（Chromium 的缩略图是平滑的，COLORONCOLOR 会有明显锯齿）；
-    // 放大用 COLORONCOLOR 保持边缘清晰。HALFTONE 需要设置刷子原点，否则会有偏移。
+    
+    
     if (dst_w < src_w || dst_h < src_h) {
         SetStretchBltMode(dc_, HALFTONE);
         SetBrushOrgEx(dc_, dst_x, dst_y, nullptr);
@@ -350,4 +350,4 @@ void GdiCanvas::DrawImage(const uint8_t* bgra, int src_w, int src_h, int dst_x,
     DeleteDC(mem);
 }
 
-}  // namespace zb
+}  

@@ -11,17 +11,17 @@
 #include <cstring>
 #include <string>
 
-// --shot 无窗口截图诊断：复用真实 Render / OnLButtonDown 代码路径，把页面画到
-// 内存 DC 并存成 BMP。不依赖桌面窗口截图，因此在受限会话里也能取证。
-//
-//   zero-browser.exe --shot --url <地址> --out <bmp> [--out2 <bmp>]
-//                    [--wait 6000] [--after 1500] [--size 1180x820]
-//                    [--click X,Y] [--scroll Y]
+
+
+
+
+
+
 static int RunShotMode(int argc, char** argv) {
     zb::BrowserApp::ShotOptions opt;
     opt.url = "browser://home";
-    // 设置文件路径必须在构造 BrowserApp 之前定下来 —— 构造函数里就读设置。
-    // 用环境变量传递，i18n 那边（含以后新增的设置读取点）都只看这一个入口。
+    
+    
     std::string settings_file;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
@@ -118,7 +118,7 @@ static int RunShotMode(int argc, char** argv) {
     if (!settings_file.empty()) {
         SetEnvironmentVariableA("ZB_SETTINGS", settings_file.c_str());
     }
-    // --dump-settings / --save-settings 是纯设置操作，不截图也该能跑。
+    
     if (opt.out.empty() && !opt.dump_settings && !opt.save_settings) {
         std::printf(
             "用法: zero-browser.exe --shot --url <地址> --out <bmp> "
@@ -161,7 +161,7 @@ int main(int argc, char** argv) {
     bool shot_mode = argc > 1 && std::strcmp(argv[1], "--shot") == 0;
     bool net_test = argc > 1 && std::strcmp(argv[1], "--net-test") == 0;
 
-    // Console subsystem keeps startup reliable; hide the console and run as GUI.
+    
     if (!net_test && !shot_mode &&
         !GetEnvironmentVariableA("ZB_KEEP_CONSOLE", nullptr, 0)) {
         FreeConsole();
@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
         std::printf("content_type=%s\n", res.content_type.c_str());
         std::printf("error=%s\n", res.error.c_str());
         std::printf("bytes=%zu\n", res.html.size());
-        // 可选第三个参数：把正文写到文件，便于离线检查真实站点返回的内容。
+        
         if (argc > 3 && *argv[3] && !res.html.empty()) {
             FILE* f = std::fopen(argv[3], "wb");
             if (f) {
@@ -190,8 +190,8 @@ int main(int argc, char** argv) {
         return ok ? 0 : 1;
     }
 
-    // 两次带 Cookie 的请求验证 jar：第一次吸收 Set-Cookie，
-    // 第二次把 Cookie 发回给 echo 接口并打印。
+    
+    
     bool cookie_test = argc > 1 && std::strcmp(argv[1], "--cookie-test") == 0;
     if (cookie_test && argc >= 4) {
         zb::FetchResult first;

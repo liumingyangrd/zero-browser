@@ -85,4 +85,4 @@ std::string AnsiToUtf8(const std::string& ansi);
 std::wstring Utf8ToWide(const std::string& utf8);
 std::string WideToUtf8(const std::wstring& wide);
 
-}  // namespace zb
+}  

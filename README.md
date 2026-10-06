@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -22,6 +22,9 @@ HTML 解析、CSS 选择器与样式计算、盒模型布局、文本排版、�
 ### 静态排版、CSS 与浏览器外壳
 
 多标签、地址栏、前进/后退/刷新、滚轮滚动、自绘滚动条与状态栏全部自绘。
+地址栏是**自己实现的单行编辑框**：光标定位、按码点删除、选择区（拖动选择 /
+`Shift`+方向键 / `Ctrl+A` / 双击全选）与剪贴板（`Ctrl+C/X/V`、`Shift+Insert`、
+右键菜单）都在自绘外壳里完成。
 CSS 支持标签 / 类 / id / 后代 / `>` / 逗号分组 / `*` / **属性选择器** / **结构伪类**，
 布局支持块级文档流、行内文本换行（中文逐字断行）、flex 行与列、**CSS Grid**、
 **`position: relative / absolute / fixed` + `z-index`**、表格行、列表、`<pre>`。
@@ -191,6 +194,30 @@ build\zero-browser.exe --shot --url browser://home --out build\addr2.bmp --wait 
     --size 900x600 --set-address "a中b" --focus-address --backspace 3
 ::   期望：[address] backspace=3 bytes=1 caret=1（按 UTF-8 码点退格，不切坏汉字）
 
+:: 地址栏剪贴板回归（--clipboard 先把文本写进系统剪贴板，--paste/--copy/--cut
+:: 走真实的 Ctrl+V/C/X 分支）
+build\zero-browser.exe --shot --url browser://home --out build\clip.bmp --wait 300 ^
+    --size 900x600 --set-address "\empty" --focus-address ^
+    --clipboard "https://example.com/path" --paste 1
+::   期望：clipboard-set bytes=24 ok=1 / paste=1 bytes=24 caret=24
+build\zero-browser.exe --shot --url browser://home --out build\clip2.bmp --wait 300 ^
+    --size 900x600 --set-address "old-text-here" --focus-address ^
+    --clipboard "new.example.com" --select-all --paste 1
+::   期望：select-all sel=[0,13) / paste=1 bytes=15（粘贴会替换掉整个选择区）
+build\zero-browser.exe --shot --url browser://home --out build\clip3.bmp --wait 300 ^
+    --size 900x600 --set-address "https://cut.example.com/" --focus-address --select-all --cut
+::   期望：cut bytes=0 caret=0 readback='https://cut.example.com/'
+
+:: 快捷键回归（无窗口会话没有键盘，GetKeyState 恒为 0，--hotkey 把修饰键显式
+:: 喂进真实的 OnKeyEx 分支）
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/index.html --out build\hk.bmp ^
+    --wait 1500 --size 900x600 --hotkey ctrl+l
+::   期望：hotkey ctrl+l focused=1 sel=[0,32)（聚焦并全选）
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/index.html --out build\hk2.bmp ^
+    --wait 1500 --size 900x600 --set-address "half-typed" --focus-address --hotkey f5
+::   期望：hotkey f5 focused=1 bytes=10 pending=2
+::         （聚焦时 F5 仍然重载，而且不会丢掉正在输入的内容）
+
 :: Cookie 端到端：先开本地 cookie 测试服务器
 python tools\cookie_server.py 8899
 :: 第一次请求吸收 Set-Cookie，第二次把 Cookie 发回 echo 接口
@@ -199,6 +226,22 @@ build\zero-browser.exe --cookie-test http://127.0.0.1:8899/set-auth http://127.0
 ```
 
 BMP 里的 alpha 会补成 255，方便直接转 PNG 肉眼核对。
+
+地址栏剪贴板回归的两个注意点：
+
+- **`--clipboard` 会写系统剪贴板**（这是有意的，好让 `--paste` 读到真实内容）。
+- **非 ASCII 不能走命令行参数**：`main(int, char**)` 收的是 ANSI 代码页字节，传中文
+  进来会先被转成 GBK。要验证多字节文本，请用 `Set-Clipboard` 放好 UTF-8 文本，
+  再只跑 `--paste` / `--copy`：
+  ```powershell
+  Set-Clipboard -Value "零浏览器.cn/路径"      # 22 字节 UTF-8
+  build\zero-browser.exe --shot --url browser://home --out build\clip4.bmp ^
+      --wait 300 --size 900x600 --set-address "\empty" --focus-address --paste 1 --copy
+  :: 期望：paste=1 bytes=22 caret=22，随后 (Get-Clipboard) 与原文完全一致
+  ```
+
+选中高亮可以像素级核对：画在文字之下的高亮色是 `#bfdbfe`，统计地址栏一条
+（y 44–74）里该颜色的像素数，有选择时应为数千、无选择时应为 0。
 
 其他探针：
 
@@ -309,6 +352,11 @@ build\atomic_check.exe 2000
 **浏览器外壳**
 - 多标签、地址栏、前进/后退/刷新/主页、鼠标滚轮滚动、滚动条、链接点击、
   相对 URL 解析、异步加载状态与状态栏
+- **地址栏编辑**：按点击位置定位插入点、拖动选择、`Shift`+`←/→/Home/End` 扩展选择、
+  `Ctrl+A` 全选、`Ctrl+C/X/V` 与 `Shift+Insert` 剪贴板、右键菜单
+  （剪切/复制/粘贴/全选）、`Delete`/`Backspace` 删除选择区
+- **地址栏快捷键**：`Ctrl+L` / `F6` 聚焦并全选、`F5` / `Ctrl+R` 重载
+  （地址栏聚焦时同样生效，且保留正在输入的内容）、`Esc` 放弃编辑、`Enter` 导航
 
 **视频**
 - `<video src>` / `<source src>`，`autoplay` / `loop` / `muted` / `controls` / `width` / `height`
@@ -488,6 +536,26 @@ zero-browser/
     并在播放器 `Close()` 时删除（实测运行前后临时目录文件数都是 0）。
     注意 MinGW 的 `mfplat` 导入库里**没有** `MFCreateMFByteStreamOnStream` 这个符号，
     想用内存流方案会链接失败（`undefined reference to ...@8`）。
+25. **地址栏聚焦时，`OnKey` 里所有全局快捷键都会被吞掉。** 原来的写法是
+    `if (address_focused_) { ...处理编辑键...; return; }` 放在最前面，于是只要光标在
+    地址栏里，`F5` / `Ctrl+R` / `Ctrl+L` 全部无效（既不重载也不聚焦）。
+    正确顺序是**先处理全局快捷键、再进编辑分支**。同理，`F5` 重载不能把地址栏里
+    正在输入的内容冲掉：`NavigateTo` 会主动失焦并同步 URL，所以重载前要先存后还原。
+26. **剪贴板文本必须先去换行再插入地址栏。** 复制来的文本常带尾随 `\r\n`，
+    直接拼进 URL 会让 `WinHttpOpen` 拿到带换行的地址（导航失败，或请求行被污染）。
+    读剪贴板时要一并丢掉 C0/C1 控制字符与 U+2028/2029；另外 `CF_TEXT` 回退分支
+    要按 `CP_ACP` 转换，且**缓冲必须开 `n` 个 `wchar_t`**——字符串开 `n-1` 再让 API
+    写 `n` 个（含结尾 `\0`）会越界一个 `wchar_t`。
+27. **写剪贴板时 `SetClipboardData` 成功后内存归系统所有。** 成功还去 `GlobalFree`
+    就是双重释放；只有失败时才由本进程释放。另外 `CF_TEXT` 只是回退项，
+    优先用 `CF_UNICODETEXT`，否则中文会按 ANSI 代码页走一圈。
+28. **窗口类不加 `CS_DBLCLKS` 就收不到 `WM_LBUTTONDBLCLK`。** 双击全选需要它；
+    同理，自绘编辑框不是 `EDIT` 控件，`WM_PASTE` / `WM_COPY` / `WM_CUT`
+    必须自己接（输入法、无障碍工具只发这三条消息）。
+29. **命令行参数不是 UTF-8。** `main(int, char**)` 拿到的是 ANSI 代码页字节，
+    用 `--clipboard "中文"` 这类参数做回归会先被转成 GBK，然后被当成 UTF-8 解释而乱码。
+    `--shot` 的无窗口会话里 `GetKeyState` 也恒为 0，所以 `--hotkey` / `--paste`
+    必须把修饰键**显式传参**，否则测的根本不是用户按下的那条分支。
 
 ---
 

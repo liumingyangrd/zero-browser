@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <sstream>
@@ -60,6 +61,107 @@ size_t Utf8NextIndex(const std::string& s, size_t i) {
     else if (c >= 0xC0) len = 2;
     if (i + len > s.size()) len = 1;
     return i + len;
+}
+
+// ---- 地址栏剪贴板 ----------------------------------------------------------
+// 右键菜单命令 ID。用 TrackPopupMenu 的 TPM_RETURNCMD 直接取返回值，不需要
+// WM_COMMAND 分发（窗口类没有菜单资源，多一层转发只会多一处出错的地方）。
+const UINT kMenuCut = 1;
+const UINT kMenuCopy = 2;
+const UINT kMenuPaste = 3;
+const UINT kMenuSelectAll = 4;
+
+// 粘贴长度上限：地址栏是单行输入框，粘几 MB 文本只会把界面拖死。
+const size_t kClipboardMaxBytes = 8192;
+
+// 地址栏只能放单行：丢掉换行、制表符、其它 C0/C1 控制字符与 U+2028/2029。
+// 这一步不能省：剪贴板文本常带尾随换行，直接拼进 URL 后 ResolveUrl 与
+// WinHttpOpen 会拿到带 \n 的地址（导航失败，或请求行被污染）。
+// 按字节扫描即可，ASCII 与多字节序列的首字节互不冲突，不会切坏 UTF-8。
+std::string SanitizeSingleLine(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size();) {
+        unsigned char c = (unsigned char)text[i];
+        if (c < 0x20 || c == 0x7F) {  // C0 控制字符（含 \r \n \t）
+            i += 1;
+            continue;
+        }
+        if (c == 0xC2 && i + 1 < text.size()) {  // U+0080..U+009F（C1 控制字符）
+            unsigned char d = (unsigned char)text[i + 1];
+            if (d >= 0x80 && d <= 0x9F) {
+                i += 2;
+                continue;
+            }
+        }
+        if (c == 0xE2 && i + 2 < text.size() &&  // U+2028 / U+2029 行分隔符
+            (unsigned char)text[i + 1] == 0x80 &&
+            ((unsigned char)text[i + 2] == 0xA8 ||
+             (unsigned char)text[i + 2] == 0xA9)) {
+            i += 3;
+            continue;
+        }
+        out.push_back(text[i]);
+        i += 1;
+    }
+    if (out.size() > kClipboardMaxBytes) {
+        out.resize(Utf8SnapToBoundary(out, kClipboardMaxBytes));
+    }
+    return out;
+}
+
+// 读剪贴板文本并转 UTF-8：优先 CF_UNICODETEXT，退回 CF_TEXT（按系统 ANSI 代码页解）。
+// 打不开剪贴板（被别的进程占用）时返回空串，绝不让插入路径读到未初始化数据。
+std::string ReadClipboardText(HWND owner) {
+    std::string raw;
+    if (OpenClipboard(owner)) {
+        if (HANDLE h = GetClipboardData(CF_UNICODETEXT)) {
+            if (const wchar_t* p = (const wchar_t*)GlobalLock(h)) {
+                raw = WideToUtf8(std::wstring(p));
+                GlobalUnlock(h);
+            }
+        } else if (HANDLE h = GetClipboardData(CF_TEXT)) {
+            if (const char* p = (const char*)GlobalLock(h)) {
+                int n = MultiByteToWideChar(CP_ACP, 0, p, -1, nullptr, 0);
+                if (n > 1) {
+                    // 必须整块 n 个 wchar_t 的缓冲：字符串 size 给 n-1 再让 API
+                    // 写 n 个（含结尾 \0）会越界一个 wchar_t。
+                    std::vector<wchar_t> buf((size_t)n);
+                    MultiByteToWideChar(CP_ACP, 0, p, -1, buf.data(), n);
+                    raw = WideToUtf8(std::wstring(buf.data()));
+                }
+                GlobalUnlock(h);
+            }
+        }
+        CloseClipboard();
+    }
+    return SanitizeSingleLine(raw);
+}
+
+// 写剪贴板（CF_UNICODETEXT）。SetClipboardData 成功后内存归系统所有，
+// 不能再 GlobalFree —— 只有失败时才由本进程释放，否则就是双重释放。
+bool WriteClipboardText(HWND owner, const std::string& utf8) {
+    std::wstring wide = Utf8ToWide(utf8);
+    if (!OpenClipboard(owner)) return false;
+    bool ok = false;
+    if (EmptyClipboard()) {
+        SIZE_T bytes = (wide.size() + 1) * sizeof(wchar_t);
+        if (HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+            if (void* p = GlobalLock(h)) {
+                std::memcpy(p, wide.c_str(), bytes);
+                GlobalUnlock(h);
+                ok = SetClipboardData(CF_UNICODETEXT, h) != nullptr;
+            }
+            if (!ok) GlobalFree(h);
+        }
+    }
+    CloseClipboard();
+    return ok;
+}
+
+bool ClipboardHasText() {
+    return IsClipboardFormatAvailable(CF_UNICODETEXT) != FALSE ||
+           IsClipboardFormatAvailable(CF_TEXT) != FALSE;
 }
 
 // 把文本截断到 max_w 像素内，超长以 … 结尾。按码点切，不会切坏汉字。
@@ -783,7 +885,7 @@ void BrowserApp::Log(const std::string& msg) {
 bool BrowserApp::CreateMainWindow(bool visible, int width, int height) {
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
-    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
     wc.lpfnWndProc = &BrowserApp::StaticWndProc;
     wc.hInstance = inst_;
     wc.hCursor = LoadCursorA(nullptr, IDC_ARROW);
@@ -1004,6 +1106,70 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         PumpMessages(100);
     }
 
+    // 地址栏剪贴板回归：--clipboard 先把文本写进系统剪贴板，之后全部走真实的
+    // OnKeyEx 路径（无窗口会话里没有键盘，GetKeyState 恒为 0，所以必须显式传
+    // 修饰键，否则测的就不是用户真正按下的那条分支）。
+    if (!opt.clipboard.empty() || opt.paste > 0 || opt.select_all || opt.copy ||
+        opt.cut) {
+        address_focused_ = true;
+        if (!opt.clipboard.empty()) {
+            bool ok = WriteClipboardText(hwnd_, opt.clipboard);
+            std::printf("[address] clipboard-set bytes=%zu ok=%d\n",
+                        opt.clipboard.size(), ok ? 1 : 0);
+        }
+        if (opt.select_all) {
+            OnKeyEx('A', true, false);
+            std::printf("[address] select-all sel=[%zu,%zu) len=%zu\n",
+                        AddressSelBegin(), AddressSelEnd(),
+                        AddressSelectedText().size());
+        }
+        for (int i = 0; i < opt.paste; ++i) OnKeyEx('V', true, false);
+        if (opt.paste > 0) {
+            std::printf("[address] paste=%d bytes=%zu caret=%d text='%s'\n",
+                        opt.paste, address_text_.size(), caret_,
+                        address_text_.c_str());
+        }
+        if (opt.copy) {
+            OnKeyEx('C', true, false);
+            std::printf("[address] copy-readback='%s'\n",
+                        ReadClipboardText(hwnd_).c_str());
+        }
+        if (opt.cut) {
+            OnKeyEx('X', true, false);
+            std::printf("[address] cut bytes=%zu caret=%d readback='%s'\n",
+                        address_text_.size(), caret_,
+                        ReadClipboardText(hwnd_).c_str());
+        }
+        PumpMessages(100);
+    }
+
+    // 快捷键回归：--hotkey 走与真实按键完全相同的 OnKeyEx 分支。
+    for (const std::string& hk : opt.hotkeys) {
+        bool ctrl = hk.rfind("ctrl+", 0) == 0;
+        std::string k = ctrl ? hk.substr(5) : hk;
+        UINT key = 0;
+        if (k == "f5") key = VK_F5;
+        else if (k == "escape") key = VK_ESCAPE;
+        else if (k == "enter") key = VK_RETURN;
+        else if (k.size() == 1) {
+            char c = k[0];
+            key = (UINT)((c >= 'a' && c <= 'z') ? c - 32 : c);
+        }
+        if (!key) {
+            std::printf("[hotkey] %s -> 未知按键名，已跳过\n", hk.c_str());
+            continue;
+        }
+        OnKeyEx(key, ctrl, false);
+        const TabState& tab = tabs_[active_];
+        std::printf(
+            "[hotkey] %s focused=%d bytes=%zu caret=%d sel=[%zu,%zu) "
+            "loading=%d pending=%d url=%s\n",
+            hk.c_str(), address_focused_ ? 1 : 0, address_text_.size(), caret_,
+            AddressSelBegin(), AddressSelEnd(), tab.loading ? 1 : 0,
+            tab.pending_seq, CurrentUrl().c_str());
+        PumpMessages(50);
+    }
+
     if (opt.dump_boxes && active_ >= 0 && active_ < (int)tabs_.size()) {
         const TabState& tab = tabs_[active_];
         std::printf("== 布局树 ==\n");
@@ -1089,9 +1255,42 @@ LRESULT BrowserApp::WndProc(UINT msg, WPARAM w, LPARAM l) {
         case WM_LBUTTONDOWN:
             OnLButtonDown(GET_X_LPARAM(l), GET_Y_LPARAM(l));
             return 0;
+        case WM_LBUTTONUP:
+            OnLButtonUp(GET_X_LPARAM(l), GET_Y_LPARAM(l));
+            return 0;
+        case WM_LBUTTONDBLCLK:
+            OnLButtonDblClk(GET_X_LPARAM(l), GET_Y_LPARAM(l));
+            return 0;
+        case WM_MOUSEMOVE:
+            OnMouseMove(GET_X_LPARAM(l), GET_Y_LPARAM(l),
+                        (w & MK_LBUTTON) != 0);
+            return 0;
+        case WM_RBUTTONUP:
+            OnRButtonUp(GET_X_LPARAM(l), GET_Y_LPARAM(l));
+            return 0;
         case WM_MOUSEWHEEL:
             OnMouseWheel(GET_WHEEL_DELTA_WPARAM(w));
             return 0;
+        // 外部工具（输入法、无障碍程序）通过这三条消息驱动编辑框，
+        // 我们不是 EDIT 控件，必须自己接，否则粘贴对它们等于没实现。
+        case WM_PASTE:
+            if (address_focused_) {
+                AddressPasteFromClipboard();
+                return 0;
+            }
+            break;
+        case WM_COPY:
+            if (address_focused_) {
+                AddressCopyToClipboard();
+                return 0;
+            }
+            break;
+        case WM_CUT:
+            if (address_focused_) {
+                AddressCutToClipboard();
+                return 0;
+            }
+            break;
         case WM_KEYDOWN:
             OnKey((UINT)w);
             return 0;
@@ -1236,19 +1435,32 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     canvas.StrokeLine(home.x + 8, home.y + 22, home.x + 22, home.y + 22, 0x334155, 2);
 
     // Address bar.
-    Rect addr{140, 44, std::max(1, width_ - 148), 30};
+    // 几何一律取文件开头的 kAddr* 常量：原来这里写死了 140/44/30 并重新定义了
+    // kAddrFont/kAddrPadX，改一处忘一处就会出现「看到的位置点不中」。
+    Rect addr{kAddrX, kToolbarY, std::max(1, width_ - kAddrX - 8), kAddrH};
     uint32_t border = address_focused_ ? 0x2563eb : 0xcbd5e1;
     canvas.FillRoundRect(addr.x, addr.y, addr.w, addr.h, 7, 0xffffff);
     canvas.StrokeRect(addr.x, addr.y, addr.w, addr.h, border);
 
     // URL 文字：垂直居中，并裁剪在框内（长 URL 不能溢出到工具栏外）。
     // 之前写成固定 addr.y + 8，字号 15 时文字底部正好压在/穿过下边框。
-    const int kAddrFont = 15;
-    const int kAddrPadX = 12;
     int text_h = canvas.TextHeight(kAddrFont);
     int text_y = addr.y + std::max(2, (addr.h - text_h) / 2 + 1);
     std::string shown = address_text_;
     canvas.Clip(Rect{addr.x + 1, addr.y + 1, addr.w - 2, addr.h - 2});
+    // 选择区高亮画在文字之下：只测量前缀宽度，与 AddressCaretFromX 同源。
+    if (address_focused_ && AddressHasSelection()) {
+        size_t b = std::min(AddressSelBegin(), shown.size());
+        size_t e = std::min(AddressSelEnd(), shown.size());
+        if (e > b) {
+            int x0 = addr.x + kAddrPadX +
+                     (int)canvas.MeasureText(shown.substr(0, b), kAddrFont, false);
+            int x1 = addr.x + kAddrPadX +
+                     (int)canvas.MeasureText(shown.substr(0, e), kAddrFont, false);
+            canvas.FillRect(x0, text_y - 2, std::max(1, x1 - x0), text_h + 3,
+                            0xbfdbfe);
+        }
+    }
     canvas.DrawText(shown, addr.x + kAddrPadX, text_y, kAddrFont,
                     address_focused_ ? 0x0f172a : 0x334155, false, false, false);
     if (address_focused_ && caret_visible_) {
@@ -1396,30 +1608,32 @@ void BrowserApp::OnLButtonDown(int x, int y) {
         return;
     }
     if (hit.area == HitArea::Address) {
+        bool was_focused = address_focused_;
         address_focused_ = true;
-        // 按点击位置定位光标（原来一律跳到末尾，点中间也改不了插入点）。
-        int rel = x - (kAddrX + kAddrPadX);
-        size_t best_idx = 0;
-        int best_diff = std::abs(rel);
-        size_t idx = 0;
-        while (idx < address_text_.size()) {
-            idx = Utf8NextIndex(address_text_, idx);
-            int w = (int)measure_canvas_->MeasureText(
-                address_text_.substr(0, idx), kAddrFont, false);
-            int diff = std::abs(w - rel);
-            if (diff < best_diff) {
-                best_diff = diff;
-                best_idx = idx;
-            }
-            if (w > rel) break;
+        int clicked = (int)AddressCaretFromX(x);
+        if (!was_focused) {
+            // 点进地址栏＝全选（与系统地址栏一致）。真正的拖动会在
+            // OnMouseMove 里用 drag_anchor_ 重新起一段选择。
+            AddressSelectAll();
+            drag_anchor_ = clicked;
+        } else {
+            caret_ = clicked;
+            AddressClearSelection();
+            drag_anchor_ = clicked;
         }
-        caret_ = (int)best_idx;
+        drag_down_x_ = x;
+        mouse_selecting_ = true;
+        SetCapture(hwnd_);
         caret_visible_ = true;
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
     if (hit.area == HitArea::Page) {
         address_focused_ = false;
+        // 点页面＝放弃地址栏里没提交的内容，必须同步回真实地址，
+        // 否则地址栏会一直显示用户敲了一半却没导航的文本。
+        AddressClearSelection();
+        SyncAddress();
         if (active_ >= 0 && active_ < (int)tabs_.size()) {
             TabState& tab = tabs_[active_];
             int px = x - page_view_.x;
@@ -1451,6 +1665,58 @@ void BrowserApp::OnLButtonDown(int x, int y) {
     }
 }
 
+void BrowserApp::OnLButtonUp(int x, int y) {
+    (void)x;
+    (void)y;
+    if (mouse_selecting_) {
+        mouse_selecting_ = false;
+        ReleaseCapture();
+    }
+}
+
+void BrowserApp::OnLButtonDblClk(int x, int y) {
+    if (HitTestPoint(x, y).area != HitArea::Address) return;
+    address_focused_ = true;
+    AddressSelectAll();
+    // 双击之后还常常接着拖：把拖选起点固定到行首。
+    drag_anchor_ = 0;
+    drag_down_x_ = x;
+    mouse_selecting_ = false;
+    caret_visible_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void BrowserApp::OnMouseMove(int x, int y, bool dragging) {
+    (void)y;
+    if (!mouse_selecting_ || !dragging || !address_focused_) return;
+    if (drag_anchor_ < 0) return;
+    // 单击也会走到这里：只有真的横向移动了才把「点进即全选」换成拖动选择，
+    // 否则普通点击会立刻把全选清掉。
+    if (x == drag_down_x_) return;
+    sel_anchor_ = drag_anchor_;
+    caret_ = (int)AddressCaretFromX(x);
+    caret_visible_ = true;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void BrowserApp::OnRButtonUp(int x, int y) {
+    if (HitTestPoint(x, y).area != HitArea::Address) return;
+    address_focused_ = true;
+    if (caret_ < 0 || (size_t)caret_ > address_text_.size()) {
+        caret_ = (int)address_text_.size();
+    }
+    // 右键落在选择区之外时先清掉选择区，避免「剪切」剪掉看不见的内容。
+    if (AddressHasSelection()) {
+        size_t at = AddressCaretFromX(x);
+        if (at < AddressSelBegin() || at > AddressSelEnd()) {
+            AddressClearSelection();
+        }
+    }
+    caret_visible_ = true;
+    ShowAddressMenu(x, y);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void BrowserApp::OnMouseWheel(int delta) {
     if (active_ < 0 || active_ >= (int)tabs_.size()) return;
     TabState& tab = tabs_[active_];
@@ -1460,88 +1726,299 @@ void BrowserApp::OnMouseWheel(int delta) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+// ---- 地址栏选择区与剪贴板 ------------------------------------------------
+// 选择区与插入点都用「字节下标 + 码点边界」表示：sel_anchor_ 是固定端，
+// caret_ 是活动端，两者相等即无选择。Shift+方向键、拖动选择、双击全选
+// 共用这一套状态，不需要额外的 has_selection 标志去同步。
+bool BrowserApp::AddressHasSelection() const {
+    if (sel_anchor_ < 0) return false;
+    int c = std::max(0, caret_);
+    return sel_anchor_ != c;
+}
+
+size_t BrowserApp::AddressSelBegin() const {
+    if (!AddressHasSelection()) return (size_t)std::max(0, caret_);
+    return std::min((size_t)sel_anchor_, (size_t)std::max(0, caret_));
+}
+
+size_t BrowserApp::AddressSelEnd() const {
+    if (!AddressHasSelection()) return (size_t)std::max(0, caret_);
+    return std::max((size_t)sel_anchor_, (size_t)std::max(0, caret_));
+}
+
+std::string BrowserApp::AddressSelectedText() const {
+    if (!AddressHasSelection()) return "";
+    size_t b = AddressSelBegin();
+    size_t e = std::min(AddressSelEnd(), address_text_.size());
+    if (b >= e) return "";
+    return address_text_.substr(b, e - b);
+}
+
+void BrowserApp::AddressClearSelection() {
+    sel_anchor_ = -1;
+}
+
+void BrowserApp::AddressSelectAll() {
+    sel_anchor_ = 0;
+    caret_ = (int)address_text_.size();
+    caret_visible_ = true;
+}
+
+void BrowserApp::AddressDeleteSelection() {
+    if (!AddressHasSelection()) return;
+    size_t b = AddressSelBegin();
+    size_t e = std::min(AddressSelEnd(), address_text_.size());
+    if (b >= e) {
+        AddressClearSelection();
+        return;
+    }
+    address_text_.erase(b, e - b);
+    caret_ = (int)b;
+    AddressClearSelection();
+    caret_visible_ = true;
+}
+
+// 在插入点插入文本：先删选择区（输入与粘贴都会替换选中内容），
+// 再把插入点吸附到码点边界，最后推进插入点。
+void BrowserApp::AddressInsert(const std::string& utf8) {
+    if (utf8.empty()) return;
+    AddressDeleteSelection();
+    if (caret_ < 0) caret_ = 0;
+    if (caret_ > (int)address_text_.size()) caret_ = (int)address_text_.size();
+    caret_ = (int)Utf8SnapToBoundary(address_text_, (size_t)caret_);
+    address_text_.insert((size_t)caret_, utf8);
+    caret_ += (int)utf8.size();
+    caret_visible_ = true;
+}
+
+// 复制：没有选择区时复制整条地址（地址栏最常见的诉求就是「把网址拷走」）。
+void BrowserApp::AddressCopyToClipboard() {
+    std::string text = AddressHasSelection() ? AddressSelectedText() : address_text_;
+    if (text.empty()) return;
+    if (!WriteClipboardText(hwnd_, text)) {
+        LogStartup("[address] 写剪贴板失败 err=" +
+                   std::to_string(GetLastError()));
+        return;
+    }
+    std::printf("[address] copied=%zu bytes\n", text.size());
+}
+
+void BrowserApp::AddressCutToClipboard() {
+    if (!AddressHasSelection()) {
+        AddressSelectAll();
+        if (!AddressHasSelection()) return;
+    }
+    std::string text = AddressSelectedText();
+    if (text.empty() || !WriteClipboardText(hwnd_, text)) {
+        LogStartup("[address] 剪切写剪贴板失败 err=" +
+                   std::to_string(GetLastError()));
+        return;
+    }
+    AddressDeleteSelection();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void BrowserApp::AddressPasteFromClipboard() {
+    std::string text = ReadClipboardText(hwnd_);
+    if (text.empty()) return;
+    AddressInsert(text);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+// 按 x 像素位置算插入点下标。基准与绘制同源（kAddrX + kAddrPadX），
+// 逐码点比较前缀宽度取最近的一个。原来这段逻辑埋在 OnLButtonDown 里，
+// 拖动选择要用同一套算法，抽出来共用，避免两处实现漂移。
+size_t BrowserApp::AddressCaretFromX(int x) const {
+    if (!measure_canvas_) return 0;
+    int rel = x - (kAddrX + kAddrPadX);
+    if (rel <= 0) return 0;
+    size_t best = 0;
+    int best_diff = std::abs(rel);
+    size_t idx = 0;
+    while (idx < address_text_.size()) {
+        idx = Utf8NextIndex(address_text_, idx);
+        int w = (int)measure_canvas_->MeasureText(address_text_.substr(0, idx),
+                                                  kAddrFont, false);
+        int diff = std::abs(w - rel);
+        if (diff < best_diff) {
+            best_diff = diff;
+            best = idx;
+        }
+        if (w > rel) break;
+    }
+    return best;
+}
+
+void BrowserApp::ShowAddressMenu(int x, int y) {
+    POINT pt{x, y};
+    if (!ClientToScreen(hwnd_, &pt)) return;
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    const std::string sel = AddressSelectedText();
+    const bool has_text = !sel.empty();
+    const bool has_clip = ClipboardHasText();
+    AppendMenuW(menu, MF_STRING | (has_text ? 0 : MF_GRAYED), kMenuCut,
+                L"剪切(&T)");
+    AppendMenuW(menu,
+                MF_STRING | ((has_text || !address_text_.empty()) ? 0 : MF_GRAYED),
+                kMenuCopy, L"复制(&C)");
+    AppendMenuW(menu, MF_STRING | (has_clip ? 0 : MF_GRAYED), kMenuPaste,
+                L"粘贴(&P)");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | (address_text_.empty() ? MF_GRAYED : 0),
+                kMenuSelectAll, L"全选(&A)");
+    SetMenuDefaultItem(menu, kMenuPaste, FALSE);
+    // TPM_RETURNCMD：把命令号当返回值拿，省掉 WM_COMMAND 分发。
+    UINT cmd = (UINT)TrackPopupMenu(
+        menu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0,
+        hwnd_, nullptr);
+    DestroyMenu(menu);
+    switch (cmd) {
+        case kMenuCut:
+            AddressCutToClipboard();
+            break;
+        case kMenuCopy:
+            AddressCopyToClipboard();
+            break;
+        case kMenuPaste:
+            AddressPasteFromClipboard();
+            break;
+        case kMenuSelectAll:
+            AddressSelectAll();
+            break;
+        default:
+            return;
+    }
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void BrowserApp::OnKey(UINT key) {
-    if (address_focused_) {
-        size_t caret = (size_t)std::max(0, caret_);
-        if (caret > address_text_.size()) caret = address_text_.size();
-        if (key == VK_RETURN) {
-            NavigateTo(address_text_, true);
-            address_focused_ = false;
-            SyncAddress();
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-        if (key == VK_ESCAPE) {
-            address_focused_ = false;
-            SyncAddress();
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-        if (key == VK_BACK) {
-            // 按 UTF-8 码点删除：只删一个字节会把汉字切成半个（非法 UTF-8）。
-            if (caret > 0) {
-                size_t prev = Utf8PrevIndex(address_text_, caret);
-                address_text_.erase(prev, caret - prev);
-                caret_ = (int)prev;
-                caret_visible_ = true;
-                InvalidateRect(hwnd_, nullptr, FALSE);
-            }
-            return;
-        }
-        if (key == VK_DELETE) {
-            if (caret < address_text_.size()) {
-                size_t next = Utf8NextIndex(address_text_, caret);
-                address_text_.erase(caret, next - caret);
-                InvalidateRect(hwnd_, nullptr, FALSE);
-            }
-            return;
-        }
-        if (key == VK_LEFT) {
-            caret_ = (int)Utf8PrevIndex(address_text_, caret);
+    OnKeyEx(key, (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+            (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+}
+
+void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
+    // 全局快捷键必须放在最前面：原来地址栏一聚焦，整个函数就走进了
+    // 「地址栏分支」并在末尾 return，F5 / Ctrl+R / Ctrl+L 全部失灵。
+    if (key == VK_F5 || (ctrl && key == 'R')) {
+        // 重载不能让地址栏里正在编辑的内容丢掉：NavigateTo 会主动失焦并把
+        // 地址同步回当前 URL，所以这里先存后还原（与系统浏览器一致）。
+        bool keep_focus = address_focused_;
+        std::string keep_text = address_text_;
+        int keep_caret = caret_;
+        int keep_anchor = sel_anchor_;
+        NavigateTo(CurrentUrl(), false);
+        if (keep_focus) {
+            address_focused_ = true;
+            address_text_ = keep_text;
+            caret_ = keep_caret;
+            sel_anchor_ = keep_anchor;
             caret_visible_ = true;
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-        if (key == VK_RIGHT) {
-            caret_ = (int)Utf8NextIndex(address_text_, caret);
-            caret_visible_ = true;
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-        if (key == VK_HOME) {
-            caret_ = 0;
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
-        }
-        if (key == VK_END) {
-            caret_ = (int)address_text_.size();
-            InvalidateRect(hwnd_, nullptr, FALSE);
-            return;
         }
         return;
     }
-    if (key == 'L' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+    if ((ctrl && key == 'L') || key == VK_F6) {
         address_focused_ = true;
-        caret_ = (int)address_text_.size();
+        AddressSelectAll();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
-    if (key == VK_F5) {
-        NavigateTo(CurrentUrl(), false);
+    if (!address_focused_) return;
+
+    size_t caret = (size_t)std::max(0, caret_);
+    if (caret > address_text_.size()) caret = address_text_.size();
+    caret = Utf8SnapToBoundary(address_text_, caret);
+
+    if (key == VK_RETURN) {
+        // 空地址栏按回车：原来会 NavigateTo("")，把空串当地址去解析。
+        // 这里按「什么都没输入」处理，只退出编辑状态。
+        if (!address_text_.empty()) NavigateTo(address_text_, true);
+        address_focused_ = false;
+        AddressClearSelection();
+        SyncAddress();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    if (key == VK_ESCAPE) {
+        address_focused_ = false;
+        AddressClearSelection();
+        SyncAddress();  // 顺带把插入点复位
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    // 剪贴板快捷键：除 Ctrl+C/X/V 外，也支持 Windows 传统组合键。
+    if ((ctrl && key == 'C') || (ctrl && key == VK_INSERT)) {
+        AddressCopyToClipboard();
+        return;
+    }
+    if ((ctrl && key == 'X') || (shift && key == VK_DELETE)) {
+        AddressCutToClipboard();
+        return;
+    }
+    if ((ctrl && key == 'V') || (shift && key == VK_INSERT)) {
+        AddressPasteFromClipboard();
+        return;
+    }
+    if (ctrl && key == 'A') {
+        AddressSelectAll();
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    if (key == VK_BACK) {
+        // 有选择区先删选择区（与所有编辑框一致）；否则按 UTF-8 码点退一格，
+        // 只删一个字节会把汉字切成半个（非法 UTF-8）。
+        if (AddressHasSelection()) {
+            AddressDeleteSelection();
+        } else if (caret > 0) {
+            size_t prev = Utf8PrevIndex(address_text_, caret);
+            address_text_.erase(prev, caret - prev);
+            caret_ = (int)prev;
+            caret_visible_ = true;
+        }
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    if (key == VK_DELETE) {
+        if (AddressHasSelection()) {
+            AddressDeleteSelection();
+        } else if (caret < address_text_.size()) {
+            size_t next = Utf8NextIndex(address_text_, caret);
+            address_text_.erase(caret, next - caret);
+        }
+        // 原来这条分支漏了 caret_visible_：光标会一直停在上次闪烁的隐藏态。
+        caret_visible_ = true;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    if (key == VK_LEFT || key == VK_RIGHT) {
+        bool left = (key == VK_LEFT);
+        if (!shift && AddressHasSelection()) {
+            // 无 Shift 时先塌缩到选择区边缘（与系统编辑框一致）。
+            caret_ = (int)(left ? AddressSelBegin() : AddressSelEnd());
+            AddressClearSelection();
+        } else if (left ? (caret > 0) : (caret < address_text_.size())) {
+            if (shift && !AddressHasSelection()) sel_anchor_ = (int)caret;
+            caret_ = (int)(left ? Utf8PrevIndex(address_text_, caret)
+                                : Utf8NextIndex(address_text_, caret));
+        }
+        caret_visible_ = true;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
+    }
+    if (key == VK_HOME || key == VK_END) {
+        if (shift && !AddressHasSelection()) sel_anchor_ = (int)caret;
+        caret_ = (key == VK_HOME) ? 0 : (int)address_text_.size();
+        if (!shift) AddressClearSelection();
+        caret_visible_ = true;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return;
     }
 }
 
 void BrowserApp::OnChar(wchar_t ch) {
     if (!address_focused_ || ch < 32) return;
-    std::wstring ws(1, ch);
-    std::string s = WideToUtf8(ws);
-    if (caret_ < 0) caret_ = 0;
-    if (caret_ > (int)address_text_.size()) caret_ = (int)address_text_.size();
-    // 插入点吸附到码点边界（caret_ 正常时就是它自己，不会移位）。
-    caret_ = (int)Utf8SnapToBoundary(address_text_, (size_t)caret_);
-    address_text_.insert((size_t)caret_, s);
-    caret_ += (int)s.size();
-    caret_visible_ = true;
+    // 走 AddressInsert：有选择区时先替换掉，插入点与边界处理只有一处实现。
+    AddressInsert(WideToUtf8(std::wstring(1, ch)));
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
@@ -1572,7 +2049,13 @@ std::string BrowserApp::CurrentUrl() const {
 }
 
 void BrowserApp::SyncAddress() {
-    if (!address_focused_) address_text_ = CurrentUrl();
+    if (!address_focused_) {
+        address_text_ = CurrentUrl();
+        // 失焦后插入点与选择区必须一起复位：否则下次聚焦会带着一个指向
+        // 旧文本的选择区（下标可能已经越界），一粘贴就写到错误位置。
+        caret_ = (int)address_text_.size();
+        AddressClearSelection();
+    }
 }
 
 void BrowserApp::RelayoutActive() {

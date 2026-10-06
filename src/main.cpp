@@ -64,6 +64,22 @@ static int RunShotMode(int argc, char** argv) {
             std::string v;
             next(&v);
             opt.backspace = std::atoi(v.c_str());
+        } else if (a == "--clipboard") {
+            next(&opt.clipboard);
+        } else if (a == "--paste") {
+            std::string v;
+            next(&v);
+            opt.paste = std::atoi(v.c_str());
+        } else if (a == "--select-all") {
+            opt.select_all = true;
+        } else if (a == "--copy") {
+            opt.copy = true;
+        } else if (a == "--cut") {
+            opt.cut = true;
+        } else if (a == "--hotkey") {
+            std::string v;
+            next(&v);
+            opt.hotkeys.push_back(v);
         } else if (a == "--click") {
             std::string v;
             next(&v);
@@ -78,7 +94,9 @@ static int RunShotMode(int argc, char** argv) {
         std::printf(
             "用法: zero-browser.exe --shot --url <地址> --out <bmp> "
             "[--out2 <bmp>] [--click X,Y]... [--wait ms] [--after ms] "
-            "[--size WxH] [--scroll Y]\n");
+            "[--size WxH] [--scroll Y] [--set-address TEXT] [--focus-address] "
+            "[--type TEXT] [--backspace N] [--clipboard TEXT] [--paste N] "
+            "[--select-all] [--copy]\n");
         return 1;
     }
     std::printf("shot url=%s size=%dx%d wait=%dms clicks=%zu\n", opt.url.c_str(),

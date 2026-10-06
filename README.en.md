@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -24,7 +24,11 @@ System components are used strictly as low-level pipes (transport, decode, pixel
 ### Static layout, CSS and the browser shell
 
 Multi-tab, address bar, back/forward/reload, wheel scrolling, custom scrollbar and status bar —
-all self-drawn. CSS supports tag / class / id / descendant / `>` / comma groups / `*` /
+all self-drawn. The address bar is a **self-implemented single-line edit box**: caret placement,
+deletion by code point, the selection range (drag-select / `Shift`+arrows / `Ctrl+A` /
+double-click select-all) and the clipboard (`Ctrl+C/X/V`, `Shift+Insert`, context menu) all live
+inside the self-drawn shell.
+CSS supports tag / class / id / descendant / `>` / comma groups / `*` /
 **attribute selectors** / **structural pseudo-classes**; layout supports block flow, inline text
 wrapping (including per-character wrapping for CJK), flex row and column, **CSS Grid**,
 **`position: relative / absolute / fixed` with `z-index`**, table rows, lists and `<pre>`.
@@ -181,7 +185,7 @@ build\zero-browser.exe --shot --url http://127.0.0.1:8765/position.html ^
 :: Deliver real clicks in order (pause the picture, then seek), capturing a second image
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/video2.html ^
     --out build\a.bmp --out2 build\b.bmp ^
-    --click 512,358 --click 678,521 --wait 1200 --after 600
+    --click 512,330 --click 678,493 --wait 1200 --after 600
 
 :: Images / background images / grid / forms
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/images.html   --out build\img.bmp --wait 1500 --size 1100x1900
@@ -203,6 +207,30 @@ build\zero-browser.exe --shot --url browser://home --out build\addr2.bmp --wait 
 ::   expected: [address] backspace=1 bytes=2 caret=2
 ::   (multi-byte characters are removed as a single code point — see pitfall 22)
 
+:: Address-bar clipboard regression (--clipboard first writes the text into the system clipboard;
+:: --paste/--copy/--cut go through the real Ctrl+V/C/X branches)
+build\zero-browser.exe --shot --url browser://home --out build\clip.bmp --wait 300 ^
+    --size 900x600 --set-address "\empty" --focus-address ^
+    --clipboard "https://example.com/path" --paste 1
+::   expected: clipboard-set bytes=24 ok=1 / paste=1 bytes=24 caret=24
+build\zero-browser.exe --shot --url browser://home --out build\clip2.bmp --wait 300 ^
+    --size 900x600 --set-address "old-text-here" --focus-address ^
+    --clipboard "new.example.com" --select-all --paste 1
+::   expected: select-all sel=[0,13) / paste=1 bytes=15 (pasting replaces the whole selection)
+build\zero-browser.exe --shot --url browser://home --out build\clip3.bmp --wait 300 ^
+    --size 900x600 --set-address "https://cut.example.com/" --focus-address --select-all --cut
+::   expected: cut bytes=0 caret=0 readback='https://cut.example.com/'
+
+:: Hotkey regression (a windowless session has no keyboard and GetKeyState is always 0, so
+:: --hotkey feeds the modifier keys explicitly into the real OnKeyEx branch)
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/index.html --out build\hk.bmp ^
+    --wait 1500 --size 900x600 --hotkey ctrl+l
+::   expected: hotkey ctrl+l focused=1 sel=[0,32) (focus and select all)
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/index.html --out build\hk2.bmp ^
+    --wait 1500 --size 900x600 --set-address "half-typed" --focus-address --hotkey f5
+::   expected: hotkey f5 focused=1 bytes=10 pending=2
+::         (F5 still reloads while focused, and does not discard the text being typed)
+
 :: Cookie round-trip: start the local cookie test server first
 python tools\cookie_server.py 8899
 :: First request absorbs Set-Cookie, second sends it back to the echo endpoint
@@ -211,6 +239,25 @@ build\zero-browser.exe --cookie-test http://127.0.0.1:8899/set-auth http://127.0
 ```
 
 Alpha in the BMP is forced to 255 so it can be converted to PNG directly for eyeballing.
+
+Two things to note about the address-bar clipboard regression:
+
+- **`--clipboard` writes the system clipboard** (deliberately, so that `--paste` reads real
+  content).
+- **Non-ASCII text cannot travel through command-line arguments**: `main(int, char**)` receives
+  ANSI code-page bytes, so passing Chinese through is converted to GBK first. To verify
+  multi-byte text, put the UTF-8 text on the clipboard with `Set-Clipboard` and then run only
+  `--paste` / `--copy`:
+  ```powershell
+  Set-Clipboard -Value "零浏览器.cn/路径"      # 22 bytes in UTF-8
+  build\zero-browser.exe --shot --url browser://home --out build\clip4.bmp ^
+      --wait 300 --size 900x600 --set-address "\empty" --focus-address --paste 1 --copy
+  :: expected: paste=1 bytes=22 caret=22, and (Get-Clipboard) then matches the original exactly
+  ```
+
+The selection highlight can be verified at pixel level: the highlight colour painted underneath
+the text is `#bfdbfe`; count the pixels of that colour along the address-bar strip
+(y 44–74) — thousands with a selection, 0 without one.
 
 Other probes:
 
@@ -278,7 +325,7 @@ python tools\echo_headers.py 8901
   (relative y 22–40 vs 22–40) and later bands differ by about 6px. Before the font-size fix each
   line was 10–12px taller (root cause: `font-size` was converted as points, see pitfall 23)
 - Local regression (`--shot` measured `content_height`): images 1861 / grid 467 / position 1200 /
-  forms 469 / flexblocks 233 / video2 920 / index 577
+  forms 469 / flexblocks 233 / video2 864 / index 577
 
 > If `https://` fails with `Win32 error 12185` (`ERROR_WINHTTP_CANNOT_CONNECT`), the environment is
 > usually blocking TLS/CONNECT — it is not a bug in the browser code. On a normal Windows install
@@ -349,6 +396,12 @@ python tools\echo_headers.py 8901
 **Browser shell**
 - Multi-tab, address bar, back/forward/reload/home, wheel scrolling, scrollbar, link clicks,
   relative URL resolution, asynchronous load state and a status bar
+- **Address-bar editing**: click to place the caret, drag to select, `Shift`+`←/→/Home/End` to
+  extend the selection, `Ctrl+A` select-all, `Ctrl+C/X/V` and `Shift+Insert` clipboard, a context
+  menu (cut/copy/paste/select-all), and `Delete`/`Backspace` deletes the selection
+- **Address-bar shortcuts**: `Ctrl+L` / `F6` focus and select all, `F5` / `Ctrl+R` reload
+  (they work while the address bar is focused too, and keep the text being typed), `Esc`
+  abandons the edit, `Enter` navigates
 
 **Video**
 - `<video src>` / `<source src>` with `autoplay` / `loop` / `muted` / `controls` / `width` / `height`
@@ -563,6 +616,33 @@ zero-browser/
     player's `Close()` (measured: zero files left in the temp directory before and after).
     Note that MinGW's `mfplat` import library has **no** `MFCreateMFByteStreamOnStream` symbol, so
     the in-memory-stream approach fails to link (`undefined reference to ...@8`).
+25. **While the address bar is focused, every global shortcut is swallowed inside `OnKey`.**
+    The code used to begin with `if (address_focused_) { ...editing keys...; return; }`, so as
+    long as the caret sat in the address bar, `F5` / `Ctrl+R` / `Ctrl+L` all did nothing (neither
+    reload nor focus). The correct order is **handle the global shortcuts first, then enter the
+    editing branch**. For the same reason `F5` must not clobber what is being typed: `NavigateTo`
+    drops focus and syncs the URL on purpose, so the text has to be saved and restored around the
+    reload.
+26. **Clipboard text must have its line breaks removed before it is inserted into the address
+    bar.** Copied text often carries a trailing `\r\n`, and pasting it straight into a URL hands
+    `WinHttpOpen` an address containing a newline (navigation fails, or the request line gets
+    corrupted). Reading the clipboard must also drop C0/C1 control characters and U+2028/2029;
+    on top of that the `CF_TEXT` fallback has to convert via `CP_ACP`, and its buffer must be
+    **`n` `wchar_t`s** — allocating `n-1` for the string while the API writes `n` (including the
+    terminating `\0`) overflows by one `wchar_t`.
+27. **After a successful `SetClipboardData` the memory belongs to the system.** Calling
+    `GlobalFree` on it as well is a double free; only on failure does this process free it. Also,
+    `CF_TEXT` is only the fallback — prefer `CF_UNICODETEXT`, otherwise Chinese text makes a
+    round trip through the ANSI code page.
+28. **A window class without `CS_DBLCLKS` never receives `WM_LBUTTONDBLCLK`.** Double-click
+    select-all needs it; likewise, a self-drawn edit box is not an `EDIT` control, so
+    `WM_PASTE` / `WM_COPY` / `WM_CUT` must be handled by hand (IME and accessibility tools send
+    only these three messages).
+29. **Command-line arguments are not UTF-8.** `main(int, char**)` receives ANSI code-page bytes,
+    so a regression using an argument such as `--clipboard "中文"` is converted to GBK first and
+    then interpreted as UTF-8, producing mojibake. In a windowless `--shot` session `GetKeyState`
+    is always 0 as well, so `--hotkey` / `--paste` must take the modifier keys as **explicit
+    arguments** — otherwise the branch under test is not the one a user triggers.
 
 ---
 

@@ -76,6 +76,18 @@ public:
         std::string type_text;
         // 按 VK_BACK 走真实的 OnKey 路径，N 次（回归「按码点退格」）。
         int backspace = 0;
+        // 地址栏剪贴板回归：--clipboard 先把文本放进系统剪贴板，
+        // --paste N 走真实的 Ctrl+V 路径，--select-all / --copy 同理。
+        std::string clipboard;
+        int paste = 0;
+        bool select_all = false;
+        bool copy = false;
+        bool cut = false;
+        // 可重复的 --hotkey NAME：走真实 OnKeyEx 路径验证快捷键。
+        // 支持 ctrl+l / ctrl+r / ctrl+a / ctrl+c / ctrl+v / ctrl+x / f5 /
+        // escape / enter（无窗口会话没有键盘，GetKeyState 恒为 0，
+        // 只能这样把修饰键显式喂进去）。
+        std::vector<std::string> hotkeys;
         bool dump_boxes = false;
     };
     bool HeadlessShot(const ShotOptions& opt);
@@ -97,10 +109,33 @@ private:
     void OnPaint();
     void OnSize(int w, int h);
     void OnLButtonDown(int x, int y);
+    void OnLButtonUp(int x, int y);
+    void OnLButtonDblClk(int x, int y);
+    void OnMouseMove(int x, int y, bool dragging);
+    void OnRButtonUp(int x, int y);
     void OnMouseWheel(int delta);
     void OnKey(UINT key);
+    // 修饰键显式传入：无窗口测试（--shot）里没有真实键盘，
+    // GetKeyState 恒为 0，所以 Ctrl+V 这类快捷键必须能带参调用同一条路径。
+    void OnKeyEx(UINT key, bool ctrl, bool shift);
     void OnChar(wchar_t ch);
     void OnTimer(UINT_PTR id);
+
+    // 地址栏编辑：选择区、剪贴板、右键菜单。
+    bool AddressHasSelection() const;
+    size_t AddressSelBegin() const;
+    size_t AddressSelEnd() const;
+    std::string AddressSelectedText() const;
+    void AddressClearSelection();
+    void AddressSelectAll();
+    void AddressDeleteSelection();
+    void AddressInsert(const std::string& utf8);
+    void AddressCopyToClipboard();
+    void AddressCutToClipboard();
+    void AddressPasteFromClipboard();
+    // 按点击/拖动位置算插入点下标（绘制与命中必须同源）。
+    size_t AddressCaretFromX(int x) const;
+    void ShowAddressMenu(int x, int y);
 
     void Render(Canvas& canvas);
     void RenderTabs(Canvas& canvas);
@@ -140,6 +175,12 @@ private:
     bool address_focused_ = false;
     int caret_ = 0;
     bool caret_visible_ = true;
+    // 选择区锚点（字节下标）：<0 表示没有选择。选择区为 [min(anchor,caret),
+    // max(anchor,caret))，与插入点共用同一套码点边界规则。
+    int sel_anchor_ = -1;
+    bool mouse_selecting_ = false;
+    int drag_anchor_ = -1;
+    int drag_down_x_ = 0;
     UINT_PTR caret_timer_ = 1;
     UINT_PTR video_timer_ = 2;
     int nav_seq_ = 0;

@@ -1276,12 +1276,14 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         std::printf("== 布局树（点击之后）==\n");
         DumpBoxTree(tab.page.RootBox(), page_view_, tab.scroll, 0);
         if (tab.page.Js()) {
-            std::printf("[js] 脚本数=%d 失败=%d 监听器=%zu 定时器=%d\n",
+            // 标签用英文：--shot 的诊断输出一律英文键名（与 [address] typed=… 一致），
+            // 只有脚本名与异常文本是中文内容。README 里引用的就是这一行。
+            std::printf("[js] scripts=%d failed=%d listeners=%zu timers=%d\n",
                         tab.page.JsScriptCount(), tab.page.JsScriptFailures(),
                         tab.page.Js()->ListenerCount(),
                         tab.page.Js()->TimerCount());
             std::string jerr = tab.page.JsLastError();
-            if (!jerr.empty()) std::printf("[js] 最近错误: %s\n", jerr.c_str());
+            if (!jerr.empty()) std::printf("[js] last-error: %s\n", jerr.c_str());
             for (const std::string& line : tab.page.Js()->ScriptLog()) {
                 std::printf("%s\n", line.c_str());
             }

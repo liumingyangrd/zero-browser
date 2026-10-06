@@ -268,6 +268,8 @@ collected even without a desktop window (or where screenshots are restricted).
 
 ```bat
 :: Screenshot a page and dump the layout tree (doc + screen coordinates, runs, player state)
+::   note: --dump-boxes prints the layout tree only after the --click events are delivered, so the
+::   dump reflects the final post-click state; live box coordinates are those of the last output
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/video2.html ^
     --out build\shot.bmp --wait 3000 --size 1180x1240 --dump-boxes
 
@@ -482,6 +484,8 @@ python tools\echo_headers.py 8901
 - Tag/attribute parsing, comments, DOCTYPE, character entities (`&amp;` `&lt;` `&#x...`), void elements
 - Raw-text handling for `<title>` / `<style>` / `<script>` / `<textarea>`; case-insensitive tag and
   attribute names
+- `<!doctype …>` / `<!-- … -->` / `<![CDATA[…]]>` declaration regions are skipped as a whole
+  (case-insensitively), and a UTF-8 BOM is stripped automatically
 
 **JavaScript (self-built ES5-subset interpreter, no third-party engine)**
 - Syntax: `var`/`let`/`const`, function declarations/expressions/arrow functions, closures,

@@ -160,6 +160,8 @@ private:
                             images,
                         const std::map<std::string, std::string>& scripts);
     void OnNavigationDone(LPARAM l);
+    // 第二阶段：图片与外链脚本取完后的回执（渐进渲染，见 StartNavigate）。
+    void OnAssetsDone(LPARAM l);
     std::string CurrentUrl() const;
     // 界面显示用的地址：有正在加载的目标就显示它，否则显示当前页面地址。
     std::string DisplayUrl() const;

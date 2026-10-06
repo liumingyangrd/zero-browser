@@ -20,6 +20,8 @@ namespace {
 const wchar_t* kClassW = L"ZeroBrowserSelfBuilt";
 
 const UINT kMsgNavigationDone = WM_APP + 1;
+// 资源（图片 + 外链脚本）取完后的第二阶段消息，见 StartNavigate。
+const UINT kMsgAssetsDone = WM_APP + 2;
 
 // 工具栏与地址栏的统一几何。绘制、命中测试、光标定位必须共用这几个常量，
 // 否则改一处忘一处就会出现「看到的位置点不中」这类问题。
@@ -262,6 +264,8 @@ struct NavResult {
     // 外链脚本正文（<script src>），与图片一样由导航线程取回。
     std::map<std::string, std::string> scripts;
     // 分段耗时（毫秒）：定位"加载慢"到底慢在哪一段。
+    // true 表示这是"资源阶段"的回执（图片 + 外链脚本），不是导航完成。
+    bool assets_phase = false;
     double ms_html = 0;
     double ms_images = 0;
     double ms_scripts = 0;
@@ -1402,6 +1406,9 @@ LRESULT BrowserApp::WndProc(UINT msg, WPARAM w, LPARAM l) {
         case kMsgNavigationDone:
             OnNavigationDone(l);
             return 0;
+        case kMsgAssetsDone:
+            OnAssetsDone(l);
+            return 0;
         case WM_GETMINMAXINFO: {
             auto mm = reinterpret_cast<MINMAXINFO*>(l);
             mm->ptMinTrackSize = {760, 500};
@@ -2230,6 +2237,31 @@ void BrowserApp::RelayoutTab(int index) {
     tab.scroll = std::max(0, std::min(tab.scroll, max_scroll));
 }
 
+// 第二阶段：图片与外链脚本到手。补画一次并执行脚本。
+void BrowserApp::OnAssetsDone(LPARAM l) {
+    NavResult* raw = reinterpret_cast<NavResult*>(l);
+    if (!raw) return;
+    int idx = raw->tab_index;
+    if (idx >= 0 && idx < (int)tabs_.size()) {
+        TabState& tab = tabs_[idx];
+        // 只在这一页仍是当前已加载页面时应用：用户可能已经导航到别处了。
+        if (!raw->final_url.empty() && tab.url == raw->final_url) {
+            tab.page.SetImages(raw->images);
+            tab.page.SetExternalScripts(raw->scripts);
+            LogNavTiming(*raw);
+            tab.page.RunScripts();
+            RelayoutTab(idx);
+            tab.title = tab.page.Data().title;
+            if (idx == active_) {
+                std::wstring title = L"Zero Browser - " + Utf8ToWide(tab.title);
+                SetWindowTextW(hwnd_, title.c_str());
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+        }
+    }
+    delete raw;
+}
+
 void BrowserApp::OnNavigationDone(LPARAM l) {
     NavResult* raw = reinterpret_cast<NavResult*>(l);
     if (!raw) return;
@@ -2261,9 +2293,8 @@ void BrowserApp::FinishNavigate(int tab_index, int seq,
     tab.page.SetImages(images);
     tab.page.SetExternalScripts(scripts);
     RelayoutTab(tab_index);
-    // 脚本在首次布局之后执行：DOM 几何（getBoundingClientRect 等）这时才有值，
-    // 脚本改过 DOM 就再布局一次。
-    if (tab.page.RunScripts()) RelayoutTab(tab_index);
+    // 脚本不在这里执行：外链脚本属于第二阶段资源，等它到手再统一执行
+    // （见 OnAssetsDone），否则内联脚本会先跑一遍、外链脚本永远没机会跑。
     tab.scroll = 0;
     tab.title = tab.page.Data().title;
     if (tab.title.empty()) tab.title = resolved;
@@ -2308,27 +2339,45 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
         ULONGLONG t0 = GetTickCount64();
         LoadUrlSource(target, &html, &final_url, &error);
         ULONGLONG t1 = GetTickCount64();
-        NavResult* res = new NavResult();
-        res->tab_index = tab_index;
-        res->seq = seq;
-        res->requested = target;
-        res->html = html;
-        res->final_url = final_url;
-        res->error = error;
-        res->add_history = add_history;
         std::string res_base = final_url.empty() ? target : final_url;
-        LoadImagesForHtml(html, res_base, res->images);
+        double ms_html = (double)(t1 - t0);
+
+        // 阶段一：HTML 到手就交给 UI 解析并绘制。
+        // 实测某真实站点首页：HTML 1.4s、图片 6.6s。原来等图片齐了才画，
+        // 用户要盯 8 秒白屏；现在页面先出来，图片随后补。
+        NavResult* first = new NavResult();
+        first->tab_index = tab_index;
+        first->seq = seq;
+        first->requested = target;
+        first->html = html;
+        first->final_url = final_url;
+        first->error = error;
+        first->add_history = add_history;
+        first->ms_html = ms_html;
+        if (!PostMessage(hwnd, kMsgNavigationDone, 0, (LPARAM)first)) {
+            delete first;
+        }
+
+        // 阶段二：图片与外链脚本继续在导航线程取，取完补画一次并执行脚本。
+        NavResult* second = new NavResult();
+        second->assets_phase = true;
+        second->tab_index = tab_index;
+        second->seq = seq;
+        second->requested = target;
+        second->final_url = final_url;
+        second->html = html;
+        second->ms_html = ms_html;
         ULONGLONG t2 = GetTickCount64();
-        // 外链脚本与图片一样在导航线程取回：UI 线程只负责解析与执行
-        LoadScriptsForHtml(html, res_base, res->scripts);
+        LoadImagesForHtml(html, res_base, second->images);
         ULONGLONG t3 = GetTickCount64();
-        res->ms_html = (double)(t1 - t0);
-        res->ms_images = (double)(t2 - t1);
-        res->ms_scripts = (double)(t3 - t2);
-        res->image_count = (int)res->images.size();
-        res->script_count = (int)res->scripts.size();
-        if (!PostMessage(hwnd, kMsgNavigationDone, 0, (LPARAM)res)) {
-            delete res;
+        LoadScriptsForHtml(html, res_base, second->scripts);
+        ULONGLONG t4 = GetTickCount64();
+        second->ms_images = (double)(t3 - t2);
+        second->ms_scripts = (double)(t4 - t3);
+        second->image_count = (int)second->images.size();
+        second->script_count = (int)second->scripts.size();
+        if (!PostMessage(hwnd, kMsgAssetsDone, 0, (LPARAM)second)) {
+            delete second;
         }
     }).detach();
 }

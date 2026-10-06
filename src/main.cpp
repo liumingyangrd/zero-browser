@@ -20,12 +20,17 @@
 static int RunShotMode(int argc, char** argv) {
     zb::BrowserApp::ShotOptions opt;
     opt.url = "browser://home";
+    // 设置文件路径必须在构造 BrowserApp 之前定下来 —— 构造函数里就读设置。
+    // 用环境变量传递，i18n 那边（含以后新增的设置读取点）都只看这一个入口。
+    std::string settings_file;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
         auto next = [&](std::string* dst) {
             if (i + 1 < argc) *dst = argv[++i];
         };
-        if (a == "--url") {
+        if (a == "--settings-file") {
+            next(&settings_file);
+        } else if (a == "--url") {
             next(&opt.url);
         } else if (a == "--out") {
             next(&opt.out);
@@ -102,20 +107,33 @@ static int RunShotMode(int argc, char** argv) {
                 act.y = y;
                 opt.actions.push_back(act);
             }
+        } else if (a == "--set-lang") {
+            next(&opt.set_lang);
+        } else if (a == "--save-settings") {
+            opt.save_settings = true;
+        } else if (a == "--dump-settings") {
+            opt.dump_settings = true;
         }
     }
-    if (opt.out.empty()) {
+    if (!settings_file.empty()) {
+        SetEnvironmentVariableA("ZB_SETTINGS", settings_file.c_str());
+    }
+    // --dump-settings / --save-settings 是纯设置操作，不截图也该能跑。
+    if (opt.out.empty() && !opt.dump_settings && !opt.save_settings) {
         std::printf(
             "用法: zero-browser.exe --shot --url <地址> --out <bmp> "
             "[--out2 <bmp>] [--click X,Y] [--type-field TEXT] [--press NAME] "
             "... [--wait ms] [--after ms] "
             "[--size WxH] [--scroll Y] [--set-address TEXT] [--focus-address] "
             "[--type TEXT] [--backspace N] [--clipboard TEXT] [--paste N] "
-            "[--select-all] [--copy] [--cut] [--hotkey NAME] [--dump-boxes]\n"
+            "[--select-all] [--copy] [--cut] [--hotkey NAME] [--dump-boxes] "
+            "[--settings-file PATH] [--set-lang zh|en|auto] [--save-settings] "
+            "[--dump-settings]\n"
             "  --click / --type-field / --press 按命令行给出的顺序依次执行，\n"
             "  所以「--click 用户名 --type-field 张三 --press enter」是一条链。\n"
             "  --press 支持 tab / shift+tab / enter / escape / backspace /\n"
-            "  delete / left / right / home / end。\n");
+            "  delete / left / right / home / end。\n"
+            "  --settings-file 让设置读写落在指定文件上，自动化测试不去碰真实配置。\n");
         return 1;
     }
     std::printf("shot url=%s size=%dx%d wait=%dms actions=%zu\n", opt.url.c_str(),

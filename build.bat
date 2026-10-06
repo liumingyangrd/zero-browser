@@ -80,6 +80,7 @@ g++ -std=c++17 -O2 -Wall -Wextra -m%~2 -D_WIN32_WINNT=0x0601 ^
   src\engine.cpp ^
   src\gdi.cpp ^
   src\html.cpp ^
+  src\i18n.cpp ^
   src\image.cpp ^
   src\network.cpp ^
   src\media.cpp ^

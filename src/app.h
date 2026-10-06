@@ -26,6 +26,7 @@ enum class HitArea {
     Forward,
     Reload,
     Home,
+    Settings,
     Address,
     CloseTab,
     Page,
@@ -111,6 +112,13 @@ public:
         // 只能这样把修饰键显式喂进去）。
         std::vector<std::string> hotkeys;
         bool dump_boxes = false;
+        // ---- 设置与界面语言的无窗口回归 ----
+        // --set-lang zh|en|auto：本次会话直接切语言（不写盘）。
+        std::string set_lang;
+        // --save-settings：把当前设置写进配置文件（验证持久化）。
+        bool save_settings = false;
+        // --dump-settings：打印语言设置、实际生效语言与配置文件路径。
+        bool dump_settings = false;
     };
     bool HeadlessShot(const ShotOptions& opt);
 

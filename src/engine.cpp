@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "html.h"
+#include "i18n.h"
 #include "js_dom.h"
 
 #include <cstdio>
@@ -13,7 +14,7 @@ namespace zb {
 namespace {
 
 const char* kHomeHtml = R"HTML(<!DOCTYPE html>
-<html><head><style>
+<html><head><title>{{home.pagetitle}}</title><style>
   * { box-sizing: border-box; }
   body { margin: 0; background: #0f172a; color: #e2e8f0; font-family: "Segoe UI"; }
   .top { background:#0b1220; border-bottom:1px solid #1e293b; padding: 18px 32px; }
@@ -30,23 +31,23 @@ const char* kHomeHtml = R"HTML(<!DOCTYPE html>
   .foot { padding:16px 32px; border-top:1px solid #1e293b; color:#64748b; font-size:12px; }
 </style></head>
 <body>
-  <div class="top"><div class="brand">ZERO Browser</div><div class="tag">自建渲染内核 · 演示首页</div></div>
+  <div class="top"><div class="brand">ZERO Browser</div><div class="tag">{{home.tag}}</div></div>
   <div class="hero">
-    <h1>一个不用 Chromium 的浏览器</h1>
-    <div class="sub">HTML 解析、CSS 解析、盒模型布局、绘制、JavaScript 解释器全部由本项目自己实现，不依赖任何现成浏览器内核。系统只负责传输、解码与出像素。这是当前网页引擎的渲染结果。</div>
+    <h1>{{home.h1}}</h1>
+    <div class="sub">{{home.sub}}</div>
   </div>
   <div class="cards">
-    <div class="card"><h3>解析器</h3><p>自带 HTML 词法/语法解析与实体解码，生成 DOM 树。</p><p><a href="about:parser">查看解析器详情</a></p></div>
-    <div class="card"><h3>CSS 引擎</h3><p>选择器（类/ID/后代/属性/结构伪类）、盒模型、flex 与 grid 布局、position 定位与 z-index。</p><p><a href="about:css">查看 CSS 能力</a></p></div>
-    <div class="card"><h3>脚本引擎</h3><p>自研 ES5 子集解释器：DOM 操作、事件冒泡、定时器。死循环与无限递归有护栏，脚本报错不影响页面渲染。</p></div>
-    <div class="card"><h3>媒体与绘制</h3><p>图片/背景图经 WIC 解码、视频帧经 Media Foundation 解码，缩放、裁剪、合成与滚动全部自研。</p></div>
+    <div class="card"><h3>{{home.card1.title}}</h3><p>{{home.card1.body}}</p><p><a href="about:parser">{{home.card1.link}}</a></p></div>
+    <div class="card"><h3>{{home.card2.title}}</h3><p>{{home.card2.body}}</p><p><a href="about:css">{{home.card2.link}}</a></p></div>
+    <div class="card"><h3>{{home.card3.title}}</h3><p>{{home.card3.body}}</p></div>
+    <div class="card"><h3>{{home.card4.title}}</h3><p>{{home.card4.body}}</p></div>
   </div>
-  <div class="foot">Zero Browser 0.1.5 · 自研渲染内核 · 页面由 zero-browser 渲染</div>
+  <div class="foot">{{home.foot}}</div>
 </body></html>
 )HTML";
 
 const char* kParserHtml = R"HTML(<!DOCTYPE html>
-<html><head><style>
+<html><head><title>{{parser.pagetitle}}</title><style>
   * { box-sizing:border-box; }
   body { margin:0; background:#f8fafc; color:#0f172a; }
   .bar { background:#0f172a; padding:14px 24px; color:#e2e8f0; }
@@ -58,18 +59,18 @@ const char* kParserHtml = R"HTML(<!DOCTYPE html>
   .note { background:#dbeafe; border:1px solid #93c5fd; border-radius:8px; padding:12px 16px; margin-top:20px; }
 </style></head>
 <body>
-  <div class="bar"><b>&lt;html&gt; 解析器</b> &nbsp; 由本项目实现的 HTML 语法分析</div>
+  <div class="bar"><b>{{parser.barTitle}}</b> &nbsp; {{parser.barSub}}</div>
   <div class="body">
-    <h1>HTML 解析管线</h1>
-    <p>源代码被逐字符扫描：标签开始/结束、属性、注释、DOCTYPE、字符实体都会处理，输出一棵 DOM 树。</p>
+    <h1>{{parser.h1}}</h1>
+    <p>{{parser.body}}</p>
     <pre>source --[ tokenizer ]--&gt; tokens --[ tree builder ]--&gt; DOM</pre>
-    <div class="note">本页由 Zero Browser 的解析器生成并排版。</div>
+    <div class="note">{{parser.note}}</div>
   </div>
 </body></html>
 )HTML";
 
 const char* kCssHtml = R"HTML(<!DOCTYPE html>
-<html><head><style>
+<html><head><title>{{css.pagetitle}}</title><style>
   * { box-sizing:border-box; }
   body { margin:0; background:#f8fafc; color:#0f172a; }
   .bar { background:#0f172a; padding:14px 24px; color:#e2e8f0; }
@@ -84,14 +85,14 @@ const char* kCssHtml = R"HTML(<!DOCTYPE html>
   pre { background:#0f172a; color:#fbbf24; padding:14px; border-radius:8px; font-size:13px; }
 </style></head>
 <body>
-  <div class="bar"><b>CSS 引擎</b> &nbsp; 由本项目实现的选择器与盒模型</div>
+  <div class="bar"><b>{{css.barTitle}}</b> &nbsp; {{css.barSub}}</div>
   <div class="body">
-    <h1>CSS 排版</h1>
-    <p>样式表被解析为规则，选择器（标签、类、ID、后代）匹配元素，属性应用进盒模型。</p>
+    <h1>{{css.h1}}</h1>
+    <p>{{css.body}}</p>
     <div class="row">
-      <div class="box b1">盒模型 + flex 布局</div>
+      <div class="box b1">{{css.box1}}</div>
       <div class="box b2">border-radius</div>
-      <div class="box b3">文本排版</div>
+      <div class="box b3">{{css.box3}}</div>
     </div>
     <pre>.card { background:#2563eb; border-radius:8px; padding:12px; }</pre>
   </div>
@@ -99,7 +100,7 @@ const char* kCssHtml = R"HTML(<!DOCTYPE html>
 )HTML";
 
 const char* kAboutHtml = R"HTML(<!DOCTYPE html>
-<html><head><style>
+<html><head><title>{{about.pagetitle}}</title><style>
   * { box-sizing:border-box; }
   body { margin:0; background:#f8fafc; color:#0f172a; font-size:15px; line-height:1.7; }
   .bar { background:#0f172a; padding:14px 24px; color:#e2e8f0; }
@@ -111,17 +112,57 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
   td:first-child { width:180px; }
 </style></head>
 <body>
-  <div class="bar"><b>about:system</b> &nbsp; 自研内核信息</div>
+  <div class="bar"><b>{{about.barTitle}}</b> &nbsp; {{about.barSub}}</div>
   <div class="body">
-    <h1>Zero Browser 系统信息</h1>
+    <h1>{{about.h1}}</h1>
     <table>
-      <tr><td>HTML 解析器</td><td>内置（tokenizer + tree builder）</td></tr>
-      <tr><td>CSS 引擎</td><td>内置（selector + box model）</td></tr>
-      <tr><td>布局引擎</td><td>内置（block / inline / flex / grid / position）</td></tr>
-      <tr><td>传输与解码</td><td>WinHTTP / Media Foundation / WIC / WASAPI（仅底层管道）</td></tr>
-      <tr><td>渲染</td><td>GDI 像素输出，无 WebView / Chromium</td></tr>
-      <tr><td>版本</td><td>0.1.5</td></tr>
+      <tr><td>{{about.rowHtml}}</td><td>{{about.valHtml}}</td></tr>
+      <tr><td>{{about.rowCss}}</td><td>{{about.valCss}}</td></tr>
+      <tr><td>{{about.rowLayout}}</td><td>{{about.valLayout}}</td></tr>
+      <tr><td>{{about.rowTransport}}</td><td>{{about.valTransport}}</td></tr>
+      <tr><td>{{about.rowRender}}</td><td>{{about.valRender}}</td></tr>
+      <tr><td>{{about.rowVersion}}</td><td>0.1.5</td></tr>
     </table>
+  </div>
+</body></html>
+)HTML";
+
+// 设置页。选项做成 <a href="browser://settings?lang=xx">，点击就是一次普通导航 ——
+// 外壳在 LoadUrlSource 里解析查询串、落盘、再用新语言重新生成这一页。
+// 这样不必给内置页单独造一套"控件改设置"的通路。
+const char* kSettingsHtml = R"HTML(<!DOCTYPE html>
+<html><head><title>{{settings.title}}</title><style>
+  * { box-sizing:border-box; }
+  body { margin:0; background:#f8fafc; color:#0f172a; font-size:15px; line-height:1.7; }
+  .bar { background:#0f172a; padding:14px 24px; color:#e2e8f0; }
+  .bar b { color:#34d399; font-size:20px; }
+  .body { padding:24px; max-width:720px; }
+  h1 { font-size:24px; margin:0 0 4px 0; }
+  .lead { color:#475569; margin:0 0 8px 0; font-size:14px; }
+  h2 { font-size:16px; margin:26px 0 10px 0; }
+  .opt { display:block; border:1px solid #cbd5e1; border-radius:8px; padding:10px 14px; margin-bottom:8px; background:#ffffff; text-decoration:none; color:#0f172a; }
+  .opt.on { border-color:#2563eb; background:#eff6ff; font-weight:bold; }
+  .mark { color:#2563eb; font-weight:normal; font-size:13px; }
+  .meta { margin-top:26px; font-size:13px; color:#475569; }
+  table { border-collapse:collapse; font-size:13px; }
+  td { border:1px solid #cbd5e1; padding:6px 10px; }
+  td.k { background:#f1f5f9; }
+  .back { display:block; margin-top:22px; font-size:14px; }
+</style></head>
+<body>
+  <div class="bar"><b>{{settings.heading}}</b> &nbsp; browser://settings</div>
+  <div class="body">
+    <h1>{{settings.heading}}</h1>
+    <p class="lead">{{settings.lead}}</p>
+    <h2>{{settings.language}}</h2>
+    {{settings.options}}
+    <div class="meta">
+      <table>
+        <tr><td class="k">{{settings.effective}}</td><td>{{settings.effectiveValue}}</td></tr>
+        <tr><td class="k">{{settings.storageHint}}</td><td>{{settings.storageValue}}</td></tr>
+      </table>
+    </div>
+    <a class="back" href="browser://home">{{settings.backHome}}</a>
   </div>
 </body></html>
 )HTML";
@@ -2383,6 +2424,16 @@ void CollectLinks(const Box& box, std::vector<LinkArea>& out,
         }
     }
     for (const auto& c : box.children) CollectLinks(*c, out, is_fixed);
+    // 块级 <a>（display:block 的链接）整块都可点，点哪儿都算点中这个链接。
+    // 原来只收集 run 上的 link 标记，而块级 <a> 的文字是它子盒里的普通 run、
+    // 从来没带过 link —— 于是 <a style="display:block"> 整块点不动。
+    // （设置页的语言选项就是这么写的，点了没反应。）
+    // 放在子盒之后追加：万一块里嵌了行内链接，让更精确的那个先命中。
+    if (box.node && box.node->type == NodeType::Element &&
+        box.node->tag == "a") {
+        std::string href = box.node->Attr("href");
+        if (!href.empty()) out.push_back({box.rect, href, is_fixed});
+    }
 }
 
 }  // namespace
@@ -2683,17 +2734,113 @@ void Page::SetScroll(int y) {
     scroll_y_ = std::max(0, y);
 }
 
-std::string BuiltinHtml(const std::string& key) {
+namespace {
+
+// 把内置页模板里的 {{key}} 换成界面字符串。
+// 只有形如 {{a.b2}}（小写字母 / 数字 / 点）的才算占位符 —— 内置页里有 CSS，
+// 不做这个形状校验的话，花括号容易被误当成 token。
+std::string SubstituteBuiltinTokens(
+    const std::string& tmpl,
+    const std::map<std::string, std::string>& extra = {}) {
+    auto is_key_char = [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+               (c >= '0' && c <= '9') || c == '.' || c == '_';
+    };
+    std::string out;
+    out.reserve(tmpl.size() + 256);
+    size_t i = 0;
+    while (i < tmpl.size()) {
+        if (tmpl[i] == '{' && i + 1 < tmpl.size() && tmpl[i + 1] == '{') {
+            size_t end = tmpl.find("}}", i + 2);
+            if (end != std::string::npos) {
+                std::string key = tmpl.substr(i + 2, end - i - 2);
+                bool shaped = !key.empty();
+                for (char c : key) {
+                    if (!is_key_char(c)) {
+                        shaped = false;
+                        break;
+                    }
+                }
+                if (shaped) {
+                    auto it = extra.find(key);
+                    out += (it != extra.end()) ? it->second : T(key.c_str());
+                    i = end + 2;
+                    continue;
+                }
+            }
+        }
+        out.push_back(tmpl[i++]);
+    }
+    return out;
+}
+
+// 设置页的语言选项：当前那项加 .on 并标出"（当前）"。
+std::string BuildLangOptions() {
+    struct Opt {
+        const char* code;
+        const char* label_key;
+    };
+    static const Opt kOpts[] = {
+        {"auto", "settings.langAuto"},
+        {"zh", "settings.langZh"},
+        {"en", "settings.langEn"},
+    };
+    std::string out;
+    for (const Opt& o : kOpts) {
+        bool on = std::strcmp(UiLangSetting(), o.code) == 0;
+        out += "<a class=\"opt";
+        if (on) out += " on";
+        out += "\" href=\"browser://settings?lang=";
+        out += o.code;
+        out += "\">";
+        out += T(o.label_key);
+        if (on) {
+            out += " <span class=\"mark\">(";
+            out += T("settings.current");
+            out += ")</span>";
+        }
+        out += "</a>\n    ";
+    }
+    return out;
+}
+
+std::string BuildSettingsPage() {
+    std::map<std::string, std::string> extra;
+    extra["settings.options"] = BuildLangOptions();
+    // 这两项是运行期状态，不适合放进静态字符串表。
+    extra["settings.effectiveValue"] = UiIsEnglish() ? "English" : "中文";
+    extra["settings.storageValue"] = SettingsFilePath();
+    return SubstituteBuiltinTokens(kSettingsHtml, extra);
+}
+
+}  // namespace
+
+std::string BuiltinHtml(const std::string& raw_key) {
+    // 查询串不影响"是哪一张内置页"：browser://settings?lang=en 仍是设置页。
+    std::string key = raw_key;
+    size_t q = key.find('?');
+    if (q != std::string::npos) key = key.substr(0, q);
+    // 主页上的链接写的是 about:parser / about:css，这里统一成同一种别名。
+    // （原来只认 parser / browser://parser，那两个链接一直静默跳回主页。）
+    if (StartsWith(key, "about:")) key = key.substr(6);
+
     if (key == "home" || key.empty() || key == "browser://home") {
-        return kHomeHtml;
+        return SubstituteBuiltinTokens(kHomeHtml);
     }
-    if (key == "parser" || key == "browser://parser") return kParserHtml;
-    if (key == "css" || key == "browser://css") return kCssHtml;
-    if (key == "about" || key == "browser://about" ||
+    if (key == "parser" || key == "browser://parser") {
+        return SubstituteBuiltinTokens(kParserHtml);
+    }
+    if (key == "css" || key == "browser://css") {
+        return SubstituteBuiltinTokens(kCssHtml);
+    }
+    if (key == "settings" || key == "browser://settings") {
+        return BuildSettingsPage();
+    }
+    if (key == "about" || key == "system" || key == "browser://about" ||
         key == "about:system") {
-        return kAboutHtml;
+        return SubstituteBuiltinTokens(kAboutHtml);
     }
-    return kHomeHtml;
+    return SubstituteBuiltinTokens(kHomeHtml);
 }
 
 }  // namespace zb

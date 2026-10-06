@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include "i18n.h"
 #include "js_dom.h"
 #include "network.h"
 
@@ -30,7 +31,10 @@ const int kToolbarY = 44;
 const int kToolbarH = 40;
 const int kBtnSize = 30;
 const int kBtnHeight = 28;
-const int kAddrX = 140;
+// 设置齿轮。放在 Home 右边，地址栏相应右移 —— 这几个常量是绘制/命中/光标
+// 共用的，改一处就够（见文件头这段注释的由来）。
+const int kSettingsX = 136;
+const int kAddrX = 176;
 const int kAddrH = 30;
 const int kAddrPadX = 12;
 const int kAddrFont = 15;
@@ -440,7 +444,7 @@ std::string FormEncode(const std::string& v) {
 }
 
 std::string ErrorHtml(const std::string& url, const std::string& error) {
-    std::string e = error.empty() ? "无法加载页面" : error;
+    std::string e = error.empty() ? T("error.unknown") : error;
     std::string escaped;
     for (char c : e) {
         if (c == '&') escaped += "&amp;";
@@ -455,8 +459,10 @@ std::string ErrorHtml(const std::string& url, const std::string& error) {
         "p{font-size:15px;line-height:1.7;color:#475569}.box{background:#ffffff;"
         "border:1px solid #e2e8f0;border-radius:10px;padding:20px;max-width:720px}"
         "code{background:#e2e8f0;padding:2px 6px;border-radius:4px}"
-        "</style></head><body><div class=\"box\"><h1>页面加载失败</h1>"
-        "<p>地址: <code>" + url + "</code></p><p>" + escaped + "</p></div></body></html>";
+        "</style></head><body><div class=\"box\"><h1>" +
+        std::string(T("error.heading")) + "</h1><p>" + T("error.addressLabel") +
+        "<code>" + url + "</code></p><p>" + escaped +
+        "</p></div></body></html>";
 }
 
 std::string ToLowerAscii(const std::string& s) {
@@ -888,6 +894,31 @@ CookieChallenge DetectCookieChallenge(const std::string& html) {
     return ch;
 }
 
+// 内置页查询串里的设置项：browser://settings?lang=en。
+// 在**UI 线程**、开导航线程之前调用，这样导航线程拿到的一定是新语言，
+// 也就不需要在两个线程之间同步设置。
+// 只有真的变了才落盘，免得每次点一下都写文件。
+void ApplyBuiltinQuery(const std::string& url) {
+    size_t q = url.find('?');
+    if (q == std::string::npos) return;
+    for (const std::string& pair : SplitStr(url.substr(q + 1), '&')) {
+        size_t eq = pair.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = Lower(Trim(pair.substr(0, eq)));
+        std::string value = Trim(pair.substr(eq + 1));
+        if (key != "lang") continue;
+        Lang before = CurrentSettings().lang;
+        Lang next = ParseLang(value, before);
+        if (next == before) continue;
+        MutableSettings().lang = next;
+        bool saved = SaveSettings();
+        // 用 printf 而不是 LogStartup：后者在非 ZB_DEBUG 构建里是空的，
+        // 而这一行要能被 --shot 的无窗口回归断言到。
+        std::printf("[settings] lang=%s saved=%d file=%s\n", UiLangSetting(),
+                    saved ? 1 : 0, SettingsFilePath().c_str());
+    }
+}
+
 bool LoadUrlSource(const std::string& raw_url, std::string* html,
                    std::string* final_url, std::string* error,
                    const std::string& post_body = std::string(),
@@ -908,7 +939,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
         path = PercentDecode(path);
         std::string data = ReadFileUtf8(path);
         if (data.empty()) {
-            *error = "文件不存在或为空: " + path;
+            *error = std::string(T("error.fileMissing")) + path;
             *html = ErrorHtml(u, *error);
             *final_url = u;
             return false;
@@ -921,7 +952,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
     if (StartsWith(u, "data:text/html")) {
         size_t comma = u.find(',');
         if (comma == std::string::npos) {
-            *error = "data URL 缺少逗号";
+            *error = T("error.dataNoComma");
             *html = ErrorHtml(u, *error);
             *final_url = u;
             return false;
@@ -961,7 +992,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
             return true;
         }
         *error = res.error.empty()
-                     ? "服务器返回 HTTP " + std::to_string(res.status)
+                     ? std::string(T("error.httpStatus")) + std::to_string(res.status)
                      : res.error;
         *html = ErrorHtml(u, *error);
         *final_url = u;
@@ -975,7 +1006,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
         error->clear();
         return true;
     }
-    *error = "无法解析这个地址，支持 browser://、file://、data:text/html、http://、https://";
+    *error = T("error.badScheme");
     *html = ErrorHtml(u, *error);
     *final_url = u;
     return false;
@@ -983,7 +1014,12 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
 
 }  // namespace
 
-BrowserApp::BrowserApp(HINSTANCE inst) : inst_(inst) {}
+BrowserApp::BrowserApp(HINSTANCE inst) : inst_(inst) {
+    // 界面语言要在这里读出来：第一次生成内置页（browser://home）就会用到它。
+    LoadSettings();
+    std::printf("[settings] lang=%s effective=%s file=%s\n", UiLangSetting(),
+                UiLangCode(), SettingsFilePath().c_str());
+}
 
 void BrowserApp::Log(const std::string& msg) {
     LogStartup(msg);
@@ -1217,6 +1253,21 @@ void BrowserApp::LogMediaState(const char* tag) const {
 }
 
 bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
+    // 语言要在建窗口/导航之前定下来：内置页第一次生成就会用到它。
+    if (!opt.set_lang.empty()) {
+        MutableSettings().lang = ParseLang(opt.set_lang, CurrentSettings().lang);
+    }
+    if (opt.save_settings) {
+        bool saved = SaveSettings();
+        std::printf("[settings] save=%d file=%s\n", saved ? 1 : 0,
+                    SettingsFilePath().c_str());
+    }
+    if (opt.dump_settings) {
+        std::printf(
+            "[settings] lang=%s effective=%s english=%d file=%s\n",
+            UiLangSetting(), UiLangCode(), UiIsEnglish() ? 1 : 0,
+            SettingsFilePath().c_str());
+    }
     if (!CreateMainWindow(false, opt.width, opt.height)) {
         std::printf("HeadlessShot: 创建隐藏窗口失败\n");
         return false;
@@ -1627,7 +1678,8 @@ void BrowserApp::RenderTabs(Canvas& canvas) {
         canvas.FillRoundRect(r.x, r.y, r.w, r.h, 7,
                              active ? 0xffffff : 0x1e293b);
         const TabState& tab = tabs_[i];
-        std::string label = tab.title.empty() ? "页面" : tab.title;
+        std::string label =
+            tab.title.empty() ? std::string(T("page.untitled")) : tab.title;
         // 标题要裁在关闭按钮左侧，否则长标题会压住 × 甚至溢出标签外。
         const int kTabFont = 13;
         int max_w = std::max(12, r.w - 9 - 26);
@@ -1699,6 +1751,26 @@ void BrowserApp::RenderToolbar(Canvas& canvas) {
     canvas.StrokeLine(home.x + 22, home.y + 13, home.x + 22, home.y + 22, 0x334155, 2);
     canvas.StrokeLine(home.x + 8, home.y + 22, home.x + 22, home.y + 22, 0x334155, 2);
 
+    // Settings：齿轮（外圈 + 8 个齿 + 内孔）。
+    Rect gear{kSettingsX, 44, 30, 28};
+    canvas.FillRoundRect(gear.x, gear.y, gear.w, gear.h, 6, 0xeef2f7);
+    int gcx = gear.x + gear.w / 2;
+    int gcy = gear.y + gear.h / 2;
+    int g_outer = 8;
+    int g_inner = 3;
+    canvas.StrokeArc({gcx - g_outer, gcy - g_outer, g_outer * 2, g_outer * 2}, 0,
+                     360, 0x334155, 2);
+    for (int i = 0; i < 8; ++i) {
+        double a = i * kPi / 4.0;
+        int x1 = gcx + (int)std::lround(std::cos(a) * g_outer);
+        int y1 = gcy - (int)std::lround(std::sin(a) * g_outer);
+        int x2 = gcx + (int)std::lround(std::cos(a) * (g_outer + 3));
+        int y2 = gcy - (int)std::lround(std::sin(a) * (g_outer + 3));
+        canvas.StrokeLine(x1, y1, x2, y2, 0x334155, 2);
+    }
+    canvas.StrokeArc({gcx - g_inner, gcy - g_inner, g_inner * 2, g_inner * 2}, 0,
+                     360, 0x334155, 2);
+
     // Address bar.
     // 几何一律取文件开头的 kAddr* 常量：原来这里写死了 140/44/30 并重新定义了
     // kAddrFont/kAddrPadX，改一处忘一处就会出现「看到的位置点不中」。
@@ -1765,7 +1837,7 @@ void BrowserApp::RenderStatus(Canvas& canvas) {
                     status_rect_.h, 0x0f172a);
     std::string text;
     if (active_ >= 0 && active_ < (int)tabs_.size() && tabs_[active_].loading) {
-        text = "加载中... " + DisplayUrl();
+        text = std::string(T("status.loading")) + DisplayUrl();
     } else {
         text = DisplayUrl();
     }
@@ -1802,6 +1874,9 @@ HitTest BrowserApp::HitTestPoint(int x, int y) const {
         }
         if (Rect{104, kToolbarY, kBtnSize, kBtnHeight}.contains(x, y)) {
             return {HitArea::Home, -1};
+        }
+        if (Rect{kSettingsX, kToolbarY, kBtnSize, kBtnHeight}.contains(x, y)) {
+            return {HitArea::Settings, -1};
         }
         if (Rect{kAddrX, kToolbarY, std::max(1, width_ - kAddrX - 8), kAddrH}
                 .contains(x, y)) {
@@ -1871,6 +1946,10 @@ void BrowserApp::OnLButtonDown(int x, int y) {
     }
     if (hit.area == HitArea::Home) {
         NavigateTo("browser://home", true);
+        return;
+    }
+    if (hit.area == HitArea::Settings) {
+        NavigateTo("browser://settings", true);
         return;
     }
     if (hit.area == HitArea::Address) {
@@ -2163,16 +2242,17 @@ void BrowserApp::ShowAddressMenu(int x, int y) {
     const std::string sel = AddressSelectedText();
     const bool has_text = !sel.empty();
     const bool has_clip = ClipboardHasText();
+    // 菜单文案走界面字符串表：T() 给的是 UTF-8，菜单 API 要 UTF-16。
     AppendMenuW(menu, MF_STRING | (has_text ? 0 : MF_GRAYED), kMenuCut,
-                L"剪切(&T)");
+                Utf8ToWide(T("menu.cut")).c_str());
     AppendMenuW(menu,
                 MF_STRING | ((has_text || !address_text_.empty()) ? 0 : MF_GRAYED),
-                kMenuCopy, L"复制(&C)");
+                kMenuCopy, Utf8ToWide(T("menu.copy")).c_str());
     AppendMenuW(menu, MF_STRING | (has_clip ? 0 : MF_GRAYED), kMenuPaste,
-                L"粘贴(&P)");
+                Utf8ToWide(T("menu.paste")).c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING | (address_text_.empty() ? MF_GRAYED : 0),
-                kMenuSelectAll, L"全选(&A)");
+                kMenuSelectAll, Utf8ToWide(T("menu.selectAll")).c_str());
     SetMenuDefaultItem(menu, kMenuPaste, FALSE);
     // TPM_RETURNCMD：把命令号当返回值拿，省掉 WM_COMMAND 分发。
     UINT cmd = (UINT)TrackPopupMenu(
@@ -2788,6 +2868,8 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
     int tab_index = active_;
     int seq = ++nav_seq_;
     std::string target = NormalizeUrlInput(url);
+    // 内置页的查询串在这里落地（改设置、落盘），必须在起导航线程之前。
+    ApplyBuiltinQuery(target);
     TabState& tab = tabs_[tab_index];
     tab.pending_seq = seq;
     tab.loading = true;

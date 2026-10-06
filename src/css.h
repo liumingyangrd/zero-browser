@@ -74,7 +74,7 @@ struct Style {
     std::string overflow = "visible";
     std::string white_space = "normal";
     // float: none | left | right。名字不能叫 float（C++ 关键字）。
-    // 网格框架（洛谷用的 Amaze UI 等）整站分栏就靠它，不实现的话所有
+    // 网格框架（Amaze UI 这一类）整站分栏就靠它，不实现的话所有
     // .am-u-md-* 列都退化成竖排块流，页面挤成一条窄栏。
     std::string css_float = "none";
     // clear: none | left | right | both
@@ -656,7 +656,7 @@ inline Color ColorFromCss(const std::string& value) {
 }
 
 // --- CSS 自定义属性（CSS 变量）---------------------------------------------
-// 真实站点（B 站、洛谷、GitHub…）大量用 var(--x) 定义颜色/间距/尺寸，
+// 真实站点大量用 var(--x) 定义颜色/间距/尺寸，
 // 不支持它会导致颜色全部回退、间距丢失，版式与 Chromium 相差很远。
 // 做法：解析样式表时把所有 `--name: value` 收进一张表，应用声明时替换 var()。
 inline std::map<std::string, std::string>& CssVars() {
@@ -676,7 +676,7 @@ inline int& RootFontSize() {
 
 // font-size 解析。这里曾经把所有非 px 的值都当成"无单位数字取整"，
 // 于是 CSS 里最常见的 1.4rem → (int)1.4 = 1px、1.6rem → 1px、2em → 2px：
-// 整站正文塌成一两个像素、所有行叠成一团黑。洛谷（Amaze UI）里 1.4rem
+// 整站正文塌成一两个像素、所有行叠成一团黑。某评测站的网格框架里 1.4rem
 // 出现 30 次，公告栏直接糊成一条。现在按 CSS 规则区分 px / % / em / rem / 关键字。
 inline int ParseFontSize(const std::string& raw, int parent_px) {
     std::string v = Trim(raw);

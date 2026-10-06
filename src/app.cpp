@@ -604,7 +604,7 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         if (end == std::string::npos) break;
         std::string tag = html.substr(img, end - img + 1);
         // 与 dom.h 的 ImageSourceOf 保持一致：src 为空/占位时回退到懒加载属性，
-        // 否则 B 站这类站点的缩略图（真实地址在 data-src）会全部缺失。
+        // 否则大型视频站这类站点的缩略图（真实地址在 data-src）会全部缺失。
         std::string src;
         static const char* kSrcAttrs[] = {
             "src",           "data-src",       "data-original",
@@ -802,7 +802,7 @@ std::string InlineExternalStylesheets(const std::string& html,
     return out;
 }
 
-// 处理「用 JS 设置 Cookie 再重载」的反爬挑战页（洛谷 / 部分国内站点使用）。
+// 处理「用 JS 设置 Cookie 再重载」的反爬挑战页（某评测站 / 部分国内站点使用）。
 // 这不是 JS 引擎，只识别挑战页里那几种固定写法：
 //   var X = ["\x61\x62", ...]          字符串数组（含 \xNN / \uNNNN 转义）
 //   xxx.cookie = "name=value; ..."     写 Cookie（含 xxx[Y[0]].cookie 这类间接写法）
@@ -941,7 +941,7 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
         }
         if (!res.html.empty()) {
             std::string final = res.final_url.empty() ? u : res.final_url;
-            // 反爬挑战页（洛谷等）：响应是个小页面，脚本里设置 Cookie 再重载。
+            // 反爬挑战页（某评测站等）：响应是个小页面，脚本里设置 Cookie 再重载。
             // 我们不是 JS 引擎，只识别这种固定写法，把 Cookie 写进 jar 后重新抓一次。
             for (int round = 0; round < 2; ++round) {
                 CookieChallenge ch = DetectCookieChallenge(res.html);

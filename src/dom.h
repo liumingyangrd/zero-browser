@@ -86,7 +86,7 @@ inline std::string NodeText(const Node* node) {
 }
 
 // 取 <img> 的实际图片来源。
-// 真实站点（B 站等）普遍用懒加载：src 先放 1x1 占位图，真实地址放在
+// 真实站点（大型视频站等）普遍用懒加载：src 先放 1x1 占位图，真实地址放在
 // data-src / data-original / data-lazy-src / srcset 里，由 JS 在进入视口后换过去。
 // 没有 JS 时若不兜底，整站缩略图全是空白——这是与 Chromium 最明显的观感差距之一。
 inline std::string ImageSourceOf(const Node* node) {

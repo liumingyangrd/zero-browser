@@ -169,7 +169,7 @@ std::string Win32Error(const char* what) {
 }
 
 // --- Minimal browser-level cookie jar -------------------------------------
-// 真实站点（洛谷 / B 站）依赖登录 Cookie 跨请求保持状态。这里按 RFC 6265 的
+// 真实站点（某评测站 / 某视频站）依赖登录 Cookie 跨请求保持状态。这里按 RFC 6265 的
 // 常用子集实现：host 匹配、路径前缀、Secure 与 HttpOnly、过期时间。
 // 只负责“哪些 Cookie 能发给哪个请求”，没有做同源策略以外的复杂校验。
 

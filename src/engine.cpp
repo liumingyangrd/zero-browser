@@ -1233,7 +1233,7 @@ void LayoutBlockFlow(Box& box, Canvas* canvas) {
     auto flush = [&]() {
         if (buf.empty()) return;
         // 行内内容同样要给已经摆好的浮动让位。少了这一步，浮动之后的行内文字
-        // 会被画在浮动的 y 上，两段内容直接叠在一起（洛谷的资讯列表就是这样）。
+        // 会被画在浮动的 y 上，两段内容直接叠在一起（某评测站的资讯列表就是这样）。
         if (float_bottom > y) y = float_bottom;
         if (!marker_done && box.node && box.node->tag == "li") {
             Style ms = box.style;
@@ -1250,7 +1250,7 @@ void LayoutBlockFlow(Box& box, Canvas* canvas) {
     };
 
     // ---- 浮动分栏 ----
-    // 网格框架（洛谷用的 Amaze UI、很多 Bootstrap 时代的站）整站分栏就是
+    // 网格框架（Amaze UI 这一类、很多 Bootstrap 时代的站）整站分栏就是
     // <div class="row"><div class="col-8" style="float:left">…</div>…</div>。
     // 不实现 float，这些列就会一个接一个竖排，整页挤成一条窄栏。
     //

@@ -379,10 +379,7 @@ HINTERNET AcquireSession(DWORD access_type, const wchar_t* named_proxy,
 bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
                DWORD access_type, const wchar_t* named_proxy,
                bool binary = false, bool use_cookies = false,
-               const std::string& referer = std::string(),
-               const std::string& method = "GET",
-               const std::string& post_body = std::string(),
-               const std::string& post_type = std::string()) {
+               const std::string& referer = std::string()) {
     if (!result) return false;
     *result = FetchResult{};
     std::wstring wurl = U8ToW(url);
@@ -425,11 +422,9 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
         return false;
     }
 
-    std::wstring wmethod = U8ToW(method);
     HINTERNET request = WinHttpOpenRequest(
-        connect, wmethod.c_str(), path_with_extra.c_str(), nullptr,
-        WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-        secure ? WINHTTP_FLAG_SECURE : 0);
+        connect, L"GET", path_with_extra.c_str(), nullptr, WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0);
     if (!request) {
         result->error = Win32Error("WinHttpOpenRequest 失败");
         WinHttpCloseHandle(connect);
@@ -476,24 +471,8 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
         }
     }
 
-    BOOL sent = FALSE;
-    if (!post_body.empty()) {
-        // 表单提交：Content-Type 由调用方给（默认 x-www-form-urlencoded）
-        std::string ctype = post_type.empty()
-                                ? std::string("application/x-www-form-urlencoded")
-                                : post_type;
-        std::wstring wheader = U8ToW("Content-Type: " + ctype + "\r\n");
-        WinHttpAddRequestHeaders(request, wheader.c_str(), (DWORD)-1L,
-                                 WINHTTP_ADDREQ_FLAG_ADD |
-                                     WINHTTP_ADDREQ_FLAG_REPLACE);
-        sent = WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                  (LPVOID)post_body.data(),
-                                  (DWORD)post_body.size(),
-                                  (DWORD)post_body.size(), 0);
-    } else {
-        sent = WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                                  WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
-    }
+    BOOL sent = WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                                   WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
     if (!sent) {
         result->error = Win32Error("请求发送失败");
         WinHttpCloseHandle(request);
@@ -590,10 +569,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
 
 bool FetchWithStrategies(const std::string& url, FetchResult* result,
                          int timeout_ms, bool binary, bool use_cookies,
-                         const std::string& referer = std::string(),
-                         const std::string& method = std::string("GET"),
-                         const std::string& body = std::string(),
-                         const std::string& content_type = std::string()) {
+                         const std::string& referer = std::string()) {
     if (!result) return false;
 
     std::string env = EnvUtf8("ZB_PROXY");
@@ -617,8 +593,7 @@ bool FetchWithStrategies(const std::string& url, FetchResult* result,
     for (const auto& attempt : attempts) {
         FetchResult one;
         bool ok = FetchOnce(url, &one, timeout_ms, attempt.type, attempt.proxy,
-                            binary, use_cookies, referer, method, body,
-                            content_type);
+                            binary, use_cookies, referer);
         if (ok && (one.status > 0 || !one.html.empty())) {
             *result = one;
             return true;
@@ -635,14 +610,6 @@ bool FetchWithStrategies(const std::string& url, FetchResult* result,
     }
     result->error = all_errors;
     return false;
-}
-
-bool FetchUrlPostWithCookies(const std::string& url, const std::string& body,
-                             const std::string& content_type,
-                             FetchResult* result, int timeout_ms,
-                             const std::string& referer) {
-    return FetchWithStrategies(url, result, timeout_ms, false, true, referer,
-                               "POST", body, content_type);
 }
 
 bool FetchUrl(const std::string& url, FetchResult* result, int timeout_ms) {

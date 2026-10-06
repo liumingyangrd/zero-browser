@@ -48,10 +48,6 @@ struct TabState {
     // 正在加载的目标地址。加载期间地址栏与状态栏显示它，而不是等加载完成才更新
     // 的 url —— 否则按下回车后地址栏会立刻弹回上一个页面（实测的 bug）。
     std::string pending_url;
-    // 页面表单焦点：表单输入与地址栏互斥，键盘二选一。
-    Node* field = nullptr;
-    int field_caret = 0;
-    bool field_focused = false;
 };
 
 class BrowserApp {
@@ -166,18 +162,6 @@ private:
     void OnNavigationDone(LPARAM l);
     // 第二阶段：图片与外链脚本取完后的回执（渐进渲染，见 StartNavigate）。
     void OnAssetsDone(LPARAM l);
-    // ---- 页面表单交互（登录这类流程的地基）
-    // 取/写控件文本：input 用 value 属性，textarea 用文本子节点，select 用当前选项。
-    std::string FieldText(const Node* n) const;
-    void SetFieldText(Node* n, const std::string& v);
-    // 点击时把焦点给控件（nullptr 表示取消焦点）
-    void FocusField(Node* n, int click_x);
-    // 提交控件所在的 <form>：GET 拼查询串，POST 走请求体。
-    bool SubmitFieldForm(Node* n);
-    // 提交用的待发请求体（NavigateTo 之前设置，StartNavigate 取用后清空）
-    std::string post_pending_body_;
-    std::string post_pending_type_;
-
     std::string CurrentUrl() const;
     // 界面显示用的地址：有正在加载的目标就显示它，否则显示当前页面地址。
     std::string DisplayUrl() const;

@@ -420,25 +420,6 @@ std::string ResolveUrl(const std::string& base, const std::string& href_raw) {
                           : base_path.substr(0, last + 1);
     return origin + NormalizePath(dir + path_part) + query;
 }
-
-// 表单编码：x-www-form-urlencoded（空格用 +，其余非字母数字按 %XX）。
-std::string FormEncode(const std::string& v) {
-    static const char* hex = "0123456789ABCDEF";
-    std::string out;
-    for (unsigned char c : v) {
-        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '*') {
-            out.push_back((char)c);
-        } else if (c == ' ') {
-            out.push_back('+');
-        } else {
-            out.push_back('%');
-            out.push_back(hex[c >> 4]);
-            out.push_back(hex[c & 0xF]);
-        }
-    }
-    return out;
-}
-
 std::string ErrorHtml(const std::string& url, const std::string& error) {
     std::string e = error.empty() ? "无法加载页面" : error;
     std::string escaped;
@@ -2223,107 +2204,6 @@ const TabState& BrowserApp::ActiveTab() const {
 std::string BrowserApp::CurrentUrl() const {
     if (tabs_.empty()) return "";
     return tabs_[active_].url;
-}
-
-std::string BrowserApp::FieldText(const Node* n) const {
-    if (!n) return "";
-    if (n->tag == "textarea") return NodeText(n);
-    if (n->tag == "select") {
-        for (const auto& c : n->children) {
-            if (c->type == NodeType::Element && c->tag == "option") {
-                return Trim(NodeText(c.get()));
-            }
-        }
-        return "";
-    }
-    return n->Attr("value");
-}
-
-void BrowserApp::SetFieldText(Node* n, const std::string& v) {
-    if (!n) return;
-    if (n->tag == "textarea") {
-        // textarea 的值是它的文本子节点（布局按文本渲染）
-        n->children.clear();
-        Node* t = MakeText(v);
-        t->parent = n;
-        n->children.emplace_back(t);
-        return;
-    }
-    n->attrs["value"] = v;
-}
-
-void BrowserApp::FocusField(Node* n, int click_x) {
-    TabState& tab = ActiveTab();
-    tab.field = n;
-    tab.field_focused = (n != nullptr);
-    std::string text = FieldText(n);
-    // 按点击位置粗定位插入点（精确测量控件内文字要另算，这里按字符比例近似）
-    int caret = (int)text.size();
-    if (n && click_x >= 0) {
-        // 控件左边界用不到像素级信息，这里保守地放到末尾；
-        // 需要精细定位时用户可以用 Home/End/左右键。
-        caret = (int)text.size();
-    }
-    tab.field_caret = caret;
-    if (n) {
-        address_focused_ = false;  // 表单与地址栏互斥
-        AddressClearSelection();
-    }
-}
-
-bool BrowserApp::SubmitFieldForm(Node* field) {
-    Node* form = field;
-    while (form && !(form->type == NodeType::Element && form->tag == "form")) {
-        form = form->parent;
-    }
-    if (!form) return false;
-    std::string method = Lower(Trim(form->Attr("method")));
-    if (method.empty()) method = "get";
-    std::string action = Trim(form->Attr("action"));
-    std::string base = CurrentUrl();
-    std::string url = action.empty() ? base : ResolveUrl(base, action);
-
-    std::string body;
-    std::vector<const Node*> stack;
-    stack.push_back(form);
-    while (!stack.empty()) {
-        const Node* n = stack.back();
-        stack.pop_back();
-        for (const auto& c : n->children) stack.push_back(c.get());
-        if (n->type != NodeType::Element) continue;
-        if (n->tag != "input" && n->tag != "textarea" && n->tag != "select") {
-            continue;
-        }
-        std::string name = n->Attr("name");
-        if (name.empty()) continue;
-        std::string type = Lower(n->Attr("type"));
-        // 按钮类控件不参与提交（点击按钮时由按钮值决定，这里从简）
-        if (n->tag == "input" &&
-            (type == "submit" || type == "button" || type == "image" ||
-             type == "reset")) {
-            continue;
-        }
-        if (n->tag == "input" && type == "checkbox" && !n->HasAttr("checked")) {
-            continue;
-        }
-        if (!body.empty()) body += "&";
-        body += FormEncode(name) + "=" + FormEncode(FieldText(n));
-    }
-
-    LogStartup("[form] submit method=" + method + " fields=" +
-               std::to_string(body.empty() ? 0 : 1) + " bytes=" +
-               std::to_string(body.size()));
-    if (method == "post") {
-        post_pending_body_ = body;
-        post_pending_type_ = "application/x-www-form-urlencoded";
-        NavigateTo(url, true);
-    } else {
-        if (!body.empty()) {
-            url += (url.find('?') == std::string::npos ? "?" : "&") + body;
-        }
-        NavigateTo(url, true);
-    }
-    return true;
 }
 
 std::string BrowserApp::DisplayUrl() const {

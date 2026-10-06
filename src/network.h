@@ -36,6 +36,14 @@ bool FetchBinaryWithCookies(const std::string& url, FetchResult* result,
                             int timeout_ms = 30000,
                             const std::string& referer = std::string());
 
+// POST（表单提交用）：body 作为请求体发出，Content-Type 默认
+// application/x-www-form-urlencoded，并带上 Cookie jar。
+// 登录这类"提交后再跳转"的流程必须走这条，GET 只能用于搜索框那类查询。
+bool FetchUrlPostWithCookies(const std::string& url, const std::string& body,
+                             const std::string& content_type,
+                             FetchResult* result, int timeout_ms = 15000,
+                             const std::string& referer = std::string());
+
 // 并行抓取一批 URL（内部用固定数量的工作线程 + 复用 WinHTTP 会话）。
 // 真实站点一次要取几十个图片/样式，串行会把首屏拖到几十秒。
 // referer 会作为这些子资源请求的 Referer 发送。

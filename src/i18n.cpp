@@ -103,8 +103,8 @@ const Entry kStrings[] = {
      "WIC decodes images and background images, Media Foundation decodes video frames; "
      "scaling, clipping, compositing and scrolling are all ours."},
     {"home.foot",
-     "Zero Browser 0.1.5 · 自研渲染内核 · 页面由 zero-browser 渲染",
-     "Zero Browser 0.1.5 · self-built rendering engine · rendered by zero-browser"},
+     "Zero Browser 0.1.6 · 自研渲染内核 · 页面由 zero-browser 渲染",
+     "Zero Browser 0.1.6 · self-built rendering engine · rendered by zero-browser"},
 
     {"parser.pagetitle", "HTML 解析器", "HTML parser"},
     {"parser.barTitle", "<html> 解析器", "<html> parser"},

@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.5-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.6-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -30,6 +30,13 @@ CSS 支持标签 / 类 / id / 后代 / `>` / 逗号分组 / `*` / **属性选择
 `align-items: stretch` 等高拉伸）、**CSS Grid**、**`float` / `clear` 分栏**、
 **`position: relative / absolute / fixed` + `z-index`**、表格行、列表、`<pre>`。
 字号按 CSS 规则处理 `px` / `%` / `em` / `rem`（`rem` 基准跟随 `html` 的 `font-size`）。
+
+### 设置与界面语言
+
+工具栏齿轮打开 `browser://settings` —— 这张设置页本身也由自研渲染器排版。
+界面语言可在**跟随系统 / 中文 / English** 之间切换，设置写入
+`%APPDATA%\ZeroBrowser\settings.ini`，重启后仍生效。状态栏、右键菜单、错误页、
+五张内置页与 `navigator.language` 都跟着界面语言走。
 
 ### 图片与背景图（WIC 解码字节为像素）
 
@@ -270,10 +277,32 @@ build\zero-browser.exe https://example.com/
 ```
 
 - 地址栏输入域名会自动补 `https://`
-- 支持 `browser://home`、`browser://about`、`file:///...`、`data:text/html,...`、`http://`、`https://`
+- 支持 `browser://home`、`browser://settings`、`browser://about`、`about:parser`、
+  `about:css`、`file:///...`、`data:text/html,...`、`http://`、`https://`
 - 环境变量 `ZB_PROXY=http://host:port` 指定 HTTP 代理
 - 环境变量 `ZB_KEEP_CONSOLE=1` 保留控制台窗口用于调试
+- 环境变量 `ZB_SETTINGS=路径` 把设置读写换到别的文件（自动化测试用，不去碰真实配置）
 - 编译时加 `-DZB_MEDIA_DEBUG` 打开媒体模块的 stderr 日志
+
+### 设置与界面语言
+
+工具栏上的**齿轮**（或直接输入 `browser://settings`）打开设置页。这一页和别的内置页一样，
+是**本项目自己的渲染引擎**画出来的：
+
+- 界面语言：**跟随系统 / 中文 / English**，当前那一项会高亮并标注"当前"
+- 页脚显示**实际生效的语言**与**配置文件路径**，不用猜设置到底落哪儿了
+
+设置存在 `%APPDATA%\ZeroBrowser\settings.ini`，重启后依然有效。
+跟着界面语言一起变的地方：状态栏、地址栏右键菜单、标签页兜底标题、错误页，
+以及全部五张内置页（主页 / 解析器 / CSS / 关于 / 设置）。`navigator.language`
+也按界面语言给 `zh-CN` 或 `en-US`。
+
+> 内置页的文案全部走 `src/i18n.cpp` 的字符串表，页面本身是带 `{{key}}` 占位符的模板 ——
+> 每张页只有一份结构，不会出现"改了中文忘了英文"。`T(key)` 找不到条目时返回**键名本身**，
+> 所以漏翻的地方会以 `settings.xxx` 的样子露出来，而不是静默变成空白（空白截图回归查不出来）。
+
+> 切换语言只重画当前页；其它已经打开的**内置页**标签要刷新一下才会跟着变
+> （普通网页不受影响）。
 
 本地验证页面：
 
@@ -299,8 +328,8 @@ python tools\form_server.py 8902
 1. **文件是不是完整的？** 在文件所在目录用 PowerShell 核对（大小与 SHA256 见
    [Releases](https://github.com/liumingyangrd/zero-browser/releases) 页面）：
    ```powershell
-   $f = ".\zero-browser-v0.1.5-win32.exe"
-   (Get-Item $f).Length                                          # 应为 3996442
+   $f = ".\zero-browser-v0.1.6-win32.exe"
+   (Get-Item $f).Length                                          # 应为 4026457
    (Get-FileHash $f -Algorithm SHA256).Hash
    [BitConverter]::ToString([IO.File]::ReadAllBytes($f)[0..1])   # 应为 4D-5A（"MZ"）
    ```
@@ -374,6 +403,31 @@ build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
 :: 网络诊断（注意：URL 直接跟在 --net-test 后面；第三个参数可选，把正文导出成文件）
 build\zero-browser.exe --net-test http://example.com/
 build\zero-browser.exe --net-test https://example.com/ build\page.html
+
+:: 设置与界面语言回归。--settings-file 把设置读写落到临时文件上，
+:: 自动化测试因此不会碰用户真实的 %APPDATA%\ZeroBrowser\settings.ini。
+::   当前语言与配置文件路径
+build\zero-browser.exe --shot --settings-file build\t.ini --dump-settings
+::   期望：[settings] lang=auto effective=zh file=build\t.ini（系统是中文时）
+::   设成英文并落盘
+build\zero-browser.exe --shot --settings-file build\t.ini --set-lang en --save-settings --dump-settings
+::   期望：[settings] save=1 … 然后 [settings] lang=en effective=en english=1
+::   新进程不带 --set-lang，应从文件读回 en（跨进程持久化）
+build\zero-browser.exe --shot --settings-file build\t.ini --dump-settings
+::   期望：[settings] lang=en effective=en english=1
+::   点设置页里的语言选项：走的是普通链接导航 + StartNavigate 里的查询串落地
+build\zero-browser.exe --shot --url browser://settings --out build\set.bmp --wait 1000 ^
+    --size 1000x800 --set-lang zh --settings-file build\t.ini --click 360,432 --wait 1500 --dump-boxes
+::   期望：[settings] lang=en saved=1，且页面文字变成 Settings / Interface language /
+::         English (current)；配置文件里 lang=en
+build\zero-browser.exe --shot --url browser://settings --out build\set2.bmp --wait 1000 ^
+    --size 1000x800 --settings-file build\t.ini --click 360,376 --wait 1500 --dump-boxes
+::   期望：点回中文 → [settings] lang=zh saved=1
+::   内置页两语对照（首页 / 设置 / 关于 / 解析器 / CSS）
+build\zero-browser.exe --shot --url browser://home --out build\i18n.bmp --wait 900 ^
+    --size 1000x800 --set-lang en --settings-file build\t.ini --dump-boxes
+::   期望：run 里出现 "Self-built"（zh 下是逐字的"自""建"…）。
+::   注意 --dump-boxes 是按词/字拆 run 的，别拿整句去匹配。
 
 :: 地址栏输入回归（走真实的 OnChar / OnKey 路径，覆盖「输入即崩溃」这类问题）
 ::   --set-address "\empty"  表示清空地址栏
@@ -517,6 +571,13 @@ build\js_probe.exe --robust
   `query=q=%E8%87%AA%E7%A0%94%E5%86%85%E6%A0%B8-Y&go=%E6%90%9C%E7%B4%A2`，
   `<button type="button">` 不提交；`Tab` 依次经过
   `input(text) → input(password) → textarea → select → button → input(submit)`
+- 设置与界面语言：`--settings-file` + `--set-lang` + `--save-settings` + `--dump-settings`
+  组成了无窗口回归。实测往返：`lang=auto`（实际 zh）→ 点 English 选项 →
+  `lang=en saved=1` 且配置文件写成 `lang=en` → **另一个进程不带 `--set-lang` 也读回 en** →
+  点中文选项 → `lang=zh saved=1`。五张内置页、错误页、标签页兜底标题、状态栏
+  都有中英两套文字对照
+- 切标签不再重排：`[perf]` 日志显示切到文档高 5914 的页面从
+  **1976ms → 不重排**（同一视口下布局结果直接复用，见踩坑第 39 条）
 - Cookie：`--cookie-test` 输出 `echo_body=Cookie: auth=abc123; pref=dark`，`jar_size=2`
 - 网络：显式 `ZB_PROXY=http://127.0.0.1:7890` 可抓取 `http://example.com`
 - **JavaScript**（`--shot` 无窗口实测，脚本内容与布局都按真实路径取证）：
@@ -661,6 +722,11 @@ build\js_probe.exe --robust
 
 ## 尚未实现
 
+- **设置项很少**：目前只有界面语言一项。没有主页设置、代理设置、字体/缩放设置、
+  清除数据入口，也没有设置界面的搜索。设置界面就是一张内置页，加新项要同时补
+  字符串表和页面模板
+- **界面语言只有中英两种**：`T()` 的表是两列（zh / en），加第三种语言要改表结构；
+  也没有做日期/数字的地域化格式
 - **JavaScript 语言特性**：没有正则表达式（`/.../` 字面量不支持）、没有 `Promise` /
   `async` / `await`、没有生成器、没有 `class` 语法、没有解构赋值与展开运算符、
   模板字符串的 `${}` 插值不支持（遇到直接报错）、`Function` 构造器不编译代码、
@@ -747,6 +813,7 @@ zero-browser/
     gfx.h                  画布抽象接口
     gdi.cpp / gdi.h        自管理画布（32 位 DIB 段）与文字/图片输出
     image.cpp / image.h    WIC 解码图片字节为 BGRA（含 alpha premultiply）
+    i18n.cpp / i18n.h      界面语言、字符串表与设置文件读写（settings.ini）
     network.cpp / .h       WinHTTP 传输层：重定向、gzip、字符集归一化、Cookie jar、代理
     js.cpp                 自研 JS 解释器的词法分析与语法分析
     js_eval.cpp            求值器：作用域、语句/表达式、调用与步数预算
@@ -916,6 +983,32 @@ zero-browser/
     渲染成空框；隐藏域则被当成普通控件排版，一个 CSRF token 就撑出 74×28 的空白。
     勾选类控件（`checkbox`/`radio`）也一样：不能落进"白底+边框+文字"那条通用输入框
     分支，否则会把 `value="1"` 当文字画在框里。
+39. **切标签不该重排整页 —— 一次点击能冻住两秒。** `OnLButtonDown` 的标签分支原来
+    无条件调用 `RelayoutActive()`，视口没变、页面也没改，纯属白干。实测切到文档高
+    5914、约 1 万个 run 的页面：**单次 1955~1976ms**，用户感觉就是"卡一下"；
+    连点当前已激活的标签也一样卡。修法是 `TabState` 记住上次布局用的视口尺寸
+    （`layout_w`/`layout_h`），新增 `EnsureLayout()` 只在尺寸变了才重排。
+    **不需要额外的"脏"标记**：所有会改页面内容的路径（导航完成、资源到齐、
+    脚本改 DOM、表单输入）本来就在改完之后强制走 `RelayoutTab`，而它会刷新这个记录。
+    同一处还有第二份白干的活：`OnAssetsDone` 也无条件重排，于是导航一次要把同一页
+    连排两遍；现在只有"真的挂上了图片"或"脚本改脏了 DOM"才重排。
+    量这种开销**不能用 `GetTickCount64`**（分辨率约 15.6ms），得上
+    `QueryPerformanceCounter`；日志阈值可用 `ZB_PERF_MS` 调（默认 4ms，
+    排查时设 0 能看到每一次重排）。
+40. **块级 `<a>` 整块点不动。** `CollectLinks` 只收集**带 link 标记的 run**，
+    而 `display:block` 的 `<a>` 会走 `PopulateBoxes` 变成一个盒子，它的文字是子盒里的
+    普通 run、从来没带过 link —— 于是整块链接在命中测试里根本不存在。
+    真实站点的导航项、列表项大量这么写，设置页的语言选项也是这么写的
+    （点了没反应才发现）。修法是在 `CollectLinks` 里把块级 `<a>` 自己的 `rect`
+    也追加成一个链接区域，并且**追加在子盒之后**，这样块里若嵌了行内链接，
+    更精确的那个仍然先命中。
+41. **内置页要同时接受 `about:` 与 `browser://` 两种写法。** 主页上"查看解析器详情"
+    的 href 是 `about:parser`，而 `BuiltinHtml` 只认 `parser` / `browser://parser`，
+    于是那两个链接**一直静默跳回主页**（点得动，但去的是错的地方，比点不动更难发现）。
+    现在统一剥掉 `about:` 前缀再匹配。
+42. **模板占位符的形状校验别写太窄。** 内置页用 `{{key}}` 占位，为了不把 CSS 花括号
+    误当占位符，我给 key 加了"只能是 a-z0-9."的校验 —— 结果 `{{about.barTitle}}`
+    因为有大写 `T` 被判定不是占位符，**原样打在页面上**。校验放宽到大写与下划线即可。
 
 ---
 

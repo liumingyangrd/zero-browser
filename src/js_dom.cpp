@@ -7,6 +7,7 @@
 #include "css.h"
 #include "engine.h"
 #include "html.h"
+#include "i18n.h"
 #include "js_internal.h"
 #include "layout.h"
 #include "network.h"
@@ -1683,8 +1684,10 @@ void JsRuntime::InstallGlobals() {
     interp_.AddGlobal("navigator", [&] {
         JsValue o = interp_.NewObject();
         o.obj->props["userAgent"] =
-            JsValue::Str("ZeroBrowser/0.1.5 (self-built engine)");
-        o.obj->props["language"] = JsValue::Str("zh-CN");
+            JsValue::Str("ZeroBrowser/0.1.6 (self-built engine)");
+        // 跟着界面语言走：脚本常按它决定取什么语言的接口。
+        o.obj->props["language"] =
+            JsValue::Str(UiIsEnglish() ? "en-US" : "zh-CN");
         return o;
     }());
     interp_.AddGlobal("screen", [&] {

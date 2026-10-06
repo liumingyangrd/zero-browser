@@ -121,7 +121,7 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
       <tr><td>{{about.rowLayout}}</td><td>{{about.valLayout}}</td></tr>
       <tr><td>{{about.rowTransport}}</td><td>{{about.valTransport}}</td></tr>
       <tr><td>{{about.rowRender}}</td><td>{{about.valRender}}</td></tr>
-      <tr><td>{{about.rowVersion}}</td><td>0.1.5</td></tr>
+      <tr><td>{{about.rowVersion}}</td><td>0.1.6</td></tr>
     </table>
   </div>
 </body></html>

@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.5-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.6-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -35,6 +35,14 @@ wrapping (including per-character wrapping for CJK), flex row and column (includ
 **`position: relative / absolute / fixed` with `z-index`**, table rows, lists and `<pre>`.
 Font sizes follow the CSS rules for `px` / `%` / `em` / `rem` (the `rem` base tracks `html`'s
 `font-size`).
+
+### Settings and interface language
+
+The gear button in the toolbar opens `browser://settings` — that page is laid out by the
+self-built renderer like any other page. The interface language switches between
+**follow system / 中文 / English**; the choice is written to
+`%APPDATA%\ZeroBrowser\settings.ini` and survives a restart. The status bar, the context menu,
+the error pages, all five built-in pages and `navigator.language` follow it.
 
 ### Images and background images (WIC decodes bytes to pixels)
 
@@ -294,11 +302,37 @@ build\zero-browser.exe https://example.com/
 ```
 
 - Typing a bare host into the address bar prepends `https://`
-- Supported schemes: `browser://home`, `browser://about`, `file:///...`, `data:text/html,...`,
-  `http://`, `https://`
+- Supported schemes: `browser://home`, `browser://settings`, `browser://about`,
+  `about:parser`, `about:css`, `file:///...`, `data:text/html,...`, `http://`, `https://`
 - Environment variable `ZB_PROXY=http://host:port` selects an HTTP proxy
 - Environment variable `ZB_KEEP_CONSOLE=1` keeps the console window for debugging
+- Environment variable `ZB_SETTINGS=path` moves the settings file somewhere else (used by the
+  automated tests so they never touch real user configuration)
 - Compile with `-DZB_MEDIA_DEBUG` to enable the media module's stderr log
+
+### Settings and interface language
+
+The **gear** button in the toolbar (or typing `browser://settings`) opens the settings page.
+Like every other built-in page, it is drawn by **this project's own rendering engine**:
+
+- Interface language: **follow system / 中文 / English**, with the active one highlighted and
+  marked "(current)"
+- The footer shows the **language actually in effect** and the **path of the config file**, so
+  there is no guessing where a setting went
+
+Settings live in `%APPDATA%\ZeroBrowser\settings.ini` and survive a restart. The status bar, the
+address-bar context menu, the tab fallback title, the error pages and all five built-in pages
+(home / parser / CSS / about / settings) follow the language, as does `navigator.language`
+(`zh-CN` or `en-US`).
+
+> All built-in page text lives in the string table in `src/i18n.cpp`, and the pages themselves
+> are templates with `{{key}}` placeholders — each page has one copy of its markup, so there is
+> no "changed the Chinese, forgot the English". When `T(key)` finds no entry it returns **the key
+> itself**, so a missed translation shows up as `settings.xxx` instead of silently rendering
+> blank (blank is invisible to a screenshot regression).
+
+> Switching the language repaints the current page only; other already-open **built-in** tabs
+> need a refresh to follow (ordinary web pages are unaffected).
 
 Local test pages:
 
@@ -324,8 +358,8 @@ the executable could not be loaded, not that the browser crashed. Check, in orde
 1. **Is the file complete?** In the folder that holds it, verify with PowerShell (size and SHA256
    are on the [Releases](https://github.com/liumingyangrd/zero-browser/releases) page):
    ```powershell
-   $f = ".\zero-browser-v0.1.5-win32.exe"
-   (Get-Item $f).Length                                          # expect 3996442
+   $f = ".\zero-browser-v0.1.6-win32.exe"
+   (Get-Item $f).Length                                          # expect 4026457
    (Get-FileHash $f -Algorithm SHA256).Hash
    [BitConverter]::ToString([IO.File]::ReadAllBytes($f)[0..1])   # expect 4D-5A ("MZ")
    ```
@@ -405,6 +439,32 @@ build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
 :: and writes the body to a file)
 build\zero-browser.exe --net-test http://example.com/
 build\zero-browser.exe --net-test https://example.com/ build\page.html
+
+:: Settings and interface-language regression. --settings-file redirects the settings file so
+:: the automated tests never touch the real %APPDATA%\ZeroBrowser\settings.ini.
+::   current language and config path
+build\zero-browser.exe --shot --settings-file build\t.ini --dump-settings
+::   expect: [settings] lang=auto effective=zh file=build\t.ini  (Chinese system)
+::   switch to English and persist
+build\zero-browser.exe --shot --settings-file build\t.ini --set-lang en --save-settings --dump-settings
+::   expect: [settings] save=1 … then [settings] lang=en effective=en english=1
+::   a fresh process without --set-lang must read en back from the file
+build\zero-browser.exe --shot --settings-file build\t.ini --dump-settings
+::   expect: [settings] lang=en effective=en english=1
+::   click a language option on the settings page: an ordinary link navigation plus the query
+::   string being applied in StartNavigate
+build\zero-browser.exe --shot --url browser://settings --out build\set.bmp --wait 1000 ^
+    --size 1000x800 --set-lang zh --settings-file build\t.ini --click 360,432 --wait 1500 --dump-boxes
+::   expect: [settings] lang=en saved=1, and the page text becomes Settings / Interface language /
+::   English (current); the config file says lang=en
+build\zero-browser.exe --shot --url browser://settings --out build\set2.bmp --wait 1000 ^
+    --size 1000x800 --settings-file build\t.ini --click 360,376 --wait 1500 --dump-boxes
+::   expect: clicking back to 中文 gives [settings] lang=zh saved=1
+::   built-in pages in both languages (home / settings / about / parser / CSS)
+build\zero-browser.exe --shot --url browser://home --out build\i18n.bmp --wait 900 ^
+    --size 1000x800 --set-lang en --settings-file build\t.ini --dump-boxes
+::   expect: a run reading "Self-built" (Chinese source splits into per-character runs).
+::   Note that --dump-boxes splits runs per word / character, so do not match a whole sentence.
 
 :: Address-bar input regression (goes through the real OnChar / OnKey paths)
 ::   --set-address "\empty"  clears the address bar
@@ -561,6 +621,15 @@ python tools\echo_headers.py 8901
   form yields `query=q=%E8%87%AA%E7%A0%94%E5%86%85%E6%A0%B8-Y&go=%E6%90%9C%E7%B4%A2`, and
   `<button type="button">` does not submit; `Tab` walks
   `input(text) → input(password) → textarea → select → button → input(submit)`
+- Settings and interface language: `--settings-file` + `--set-lang` + `--save-settings` +
+  `--dump-settings` form a windowless regression. Measured round trip: `lang=auto` (in effect
+  zh) → click the English option → `lang=en saved=1` with the config file written as `lang=en` →
+  **a separate process without `--set-lang` reads en back** → click 中文 → `lang=zh saved=1`.
+  All five built-in pages, the error page, the tab fallback title and the status bar have a
+  Chinese and an English wording
+- Tab switching no longer re-lays out: the `[perf]` log shows switching to a page with a
+  document height of 5914 going from **1976 ms to no layout at all** (the result is reused when
+  the viewport is unchanged, see pitfall 39)
 - Cookies: `--cookie-test` prints `echo_body=Cookie: auth=abc123; pref=dark` with `jar_size=2`
 - Network: with `ZB_PROXY=http://127.0.0.1:7890` set, `http://example.com` is fetched successfully
 - **JavaScript** (measured windowless with `--shot`; both the script output and the layout come from
@@ -736,6 +805,13 @@ python tools\echo_headers.py 8901
 
 ## Not implemented yet
 
+- **Very few settings**: interface language is the only one. No home page setting, no proxy
+  setting, no font/zoom setting, no "clear data" entry, and no search inside the settings page.
+  The settings screen is just a built-in page, so adding one means extending both the string
+  table and the page template
+- **Only Chinese and English**: the `T()` table has exactly two columns (zh / en), so a third
+  language would need a different table shape. There is no locale-aware date or number
+  formatting either.
 - **JavaScript language features**: no regular expressions (`/.../` literals are unsupported), no
   `Promise` / `async` / `await`, no generators, no `class` syntax, no destructuring or spread, no
   `${}` interpolation in template strings (it reports an error), the `Function` constructor does not
@@ -834,6 +910,7 @@ zero-browser/
     gfx.h                 canvas abstraction
     gdi.cpp / gdi.h       self-managed canvas (32-bit DIB section), text and image output
     image.cpp / image.h   WIC decoding of image bytes to BGRA (with alpha premultiply)
+    i18n.cpp / i18n.h     interface language, string table and settings file I/O (settings.ini)
     network.cpp / .h      WinHTTP transport: redirects, gzip, charset normalization, cookie jar, proxy
     js.cpp                lexing and parsing for the self-built JS interpreter
     js_eval.cpp           evaluator: scopes, statements/expressions, calls and the step budget
@@ -1047,6 +1124,37 @@ zero-browser/
     controls, so a single CSRF token pushed out 74×28 of blank space. Checkbox/radio controls have
     the same trap: they must not fall into the generic "white box + border + text" input branch, or
     `value="1"` gets painted inside the box as text.
+39. **Switching tabs must not re-lay out the whole page — one click could freeze for two
+    seconds.** The tab branch of `OnLButtonDown` called `RelayoutActive()` unconditionally, for
+    nothing: the viewport had not changed and the page had not been touched. Measured on a page
+    with a document height of 5914 and roughly 10k runs: **1955–1976 ms per switch**, which is the
+    freeze users report; clicking the already-active tab cost the same. The fix is for `TabState`
+    to remember the viewport size the last layout was computed at (`layout_w`/`layout_h`) and for
+    the new `EnsureLayout()` to re-lay out only when that size differs. **No extra dirty flag is
+    needed**: every path that changes page content (navigation finishing, assets arriving, scripts
+    mutating the DOM, form edits) already forces `RelayoutTab` afterwards, which refreshes the
+    record. The same commit removed a second piece of duplicated work: `OnAssetsDone` also
+    re-laid out unconditionally, so one navigation laid the same page out twice back to back; now
+    it only does so when images were really attached or a script dirtied the DOM.
+    Measuring this **cannot use `GetTickCount64`** (about 15.6 ms resolution) — it needs
+    `QueryPerformanceCounter`. The log threshold is tunable through `ZB_PERF_MS` (default 4 ms;
+    set it to 0 to see every layout).
+40. **A block-level `<a>` was not clickable at all.** `CollectLinks` only collected runs carrying
+    a link flag, but a `display:block` `<a>` goes through `PopulateBoxes` and becomes a box, whose
+    text is an ordinary run in a child box that never got the flag — so the whole block simply did
+    not exist as far as hit testing was concerned. Real sites write their nav items and list items
+    this way, and so does the settings page (which is how it was noticed: clicking did nothing).
+    The fix appends the block `<a>`'s own `rect` as a link area too, and appends it **after the
+    child boxes**, so an inline link nested inside a block link still wins.
+41. **Built-in pages must accept both the `about:` and the `browser://` spelling.** The home
+    page's "parser details" link has `href="about:parser"`, but `BuiltinHtml` only recognised
+    `parser` / `browser://parser`, so both links had been **silently falling back to the home
+    page** — they were clickable, just going to the wrong place, which is harder to notice than a
+    dead link. The `about:` prefix is now stripped before matching.
+42. **Do not make a template placeholder's shape check too narrow.** The built-in pages use
+    `{{key}}` placeholders, and to avoid mistaking CSS braces for placeholders I restricted keys to
+    `a-z0-9.` — which made `{{about.barTitle}}` fail the check because of its uppercase `T`, and
+    the token was **printed literally on the page**. Allowing uppercase and underscores is enough.
 
 ---
 

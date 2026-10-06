@@ -52,6 +52,10 @@ struct TabState {
     Node* field = nullptr;
     int field_caret = 0;
     bool field_focused = false;
+    // 上一次完成布局时用的视口尺寸。视口没变就不必重排 —— 切标签原来会无条件
+    // 整页重排，实测切到某评测站首页要冻 1.9 秒（见 EnsureLayout）。
+    int layout_w = 0;
+    int layout_h = 0;
 };
 
 class BrowserApp {
@@ -166,6 +170,10 @@ private:
     HitTest HitTestPoint(int x, int y) const;
     void RelayoutActive();
     void RelayoutTab(int index);
+    // 需要时才重排：视口尺寸与上次布局时相同就直接复用，返回是否真的排了。
+    // 切标签 / 关标签 / 新建标签走这条；页面内容变化仍走 RelayoutTab 强制重排。
+    bool EnsureLayout(int index);
+    void EnsureLayoutActive();
     void SyncAddress();
     void StartNavigate(const std::string& url, bool add_history);
     void FinishNavigate(int tab_index, int seq, const std::string& requested,

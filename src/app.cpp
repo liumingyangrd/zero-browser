@@ -1054,6 +1054,33 @@ void BrowserApp::PumpMessages(int ms) {
 
 namespace {
 
+// 高精度计时（毫秒）。不能用 GetTickCount64：它只有约 15.6ms 的分辨率，
+// 量"重排花了多少毫秒"这种几毫秒到几十毫秒的开销完全不够用。
+double NowMs() {
+    static const double kTicksPerMs = [] {
+        LARGE_INTEGER f{};
+        QueryPerformanceFrequency(&f);
+        return (double)f.QuadPart / 1000.0;
+    }();
+    LARGE_INTEGER c{};
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart / kTicksPerMs;
+}
+
+// 重排超过这个毫秒数就打一行诊断（可用 ZB_PERF_MS 覆盖）。
+// 默认 4ms：低于它的是常态（输入一个字也会重排一次），打出来只会淹没有用信息；
+// 排查卡顿时设 ZB_PERF_MS=0 就能看到每一次重排的真实开销。
+double RelayoutLogThresholdMs() {
+    static const double kDefault = 4.0;
+    static const double kValue = [] {
+        char buf[32]{};
+        DWORD n = GetEnvironmentVariableA("ZB_PERF_MS", buf, sizeof(buf));
+        if (n == 0 || n >= sizeof(buf)) return kDefault;
+        return std::atof(buf);
+    }();
+    return kValue;
+}
+
 // ---- 表单控件识别（点击定位与 Tab 换焦点共用同一套判断）----
 // 命中测试给出的节点不一定就是元素本身：自绘控件的文字是 run，其 run.node
 // 可能挂在控件的文本子节点上，所以要向上找到最近的控件元素。
@@ -1794,7 +1821,8 @@ void BrowserApp::OnLButtonDown(int x, int y) {
         active_ = hit.index;
         address_focused_ = false;
         SyncAddress();
-        RelayoutActive();
+        // 切标签只换当前页，页面内容没变 —— 视口尺寸也没变，布局直接复用。
+        EnsureLayoutActive();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
@@ -1804,7 +1832,7 @@ void BrowserApp::OnLButtonDown(int x, int y) {
             if (active_ >= (int)tabs_.size()) active_ = (int)tabs_.size() - 1;
             address_focused_ = false;
             SyncAddress();
-            RelayoutActive();
+            EnsureLayoutActive();
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
         return;
@@ -2625,13 +2653,48 @@ void BrowserApp::RelayoutActive() {
     RelayoutTab(active_);
 }
 
+void BrowserApp::EnsureLayoutActive() {
+    EnsureLayout(active_);
+}
+
+// 需要时才重排：视口尺寸和上次布局时一样，就把上次的布局结果直接拿来用。
+//
+// 原来的切标签路径无条件调用 RelayoutActive()，于是每次点标签都整页重排一遍 ——
+// 实测切到某评测站首页（文档高 5914、约 10k 个 run）单次要 1955~1976ms，
+// 用户感觉就是"卡一下"。而视口尺寸一次都没变，布局结果本来就可以复用。
+//
+// 为什么可以只比视口尺寸、不需要额外的"脏"标记：
+// 所有会改变页面内容的路径（导航完成、资源到齐、脚本改 DOM、表单输入）
+// 都在改完之后强制走过 RelayoutTab，而 RelayoutTab 会把视口尺寸记下来。
+// 所以只要视口没变，缓存就是最新的。
+bool BrowserApp::EnsureLayout(int index) {
+    if (index < 0 || index >= (int)tabs_.size()) return false;
+    if (page_view_.w <= 0) return false;
+    const TabState& tab = tabs_[index];
+    if (tab.layout_w == page_view_.w && tab.layout_h == page_view_.h) {
+        return false;
+    }
+    RelayoutTab(index);
+    return true;
+}
+
 void BrowserApp::RelayoutTab(int index) {
     if (index < 0 || index >= (int)tabs_.size()) return;
     if (page_view_.w <= 0) return;
     TabState& tab = tabs_[index];
+    double t0 = NowMs();
     tab.page.Relayout(page_view_.w, page_view_.h, measure_canvas_);
+    double ms = NowMs() - t0;
+    tab.layout_w = page_view_.w;
+    tab.layout_h = page_view_.h;
     int max_scroll = std::max(0, tab.page.ContentHeight() - page_view_.h);
     tab.scroll = std::max(0, std::min(tab.scroll, max_scroll));
+    if (ms >= RelayoutLogThresholdMs()) {
+        // 卡顿排查用：哪一页、什么视口、排了多久、文档多高。
+        std::printf("[perf] relayout tab=%d viewport=%dx%d ms=%.1f height=%d\n",
+                    index, page_view_.w, page_view_.h, ms,
+                    tab.page.ContentHeight());
+    }
 }
 
 // 第二阶段：图片与外链脚本到手。补画一次并执行脚本。
@@ -2646,8 +2709,15 @@ void BrowserApp::OnAssetsDone(LPARAM l) {
             tab.page.SetImages(raw->images);
             tab.page.SetExternalScripts(raw->scripts);
             LogNavTiming(*raw);
-            tab.page.RunScripts();
-            RelayoutTab(idx);
+            // 这一阶段「有没有真的改变布局」要判断一下再决定是否重排。
+            // 原来是无条件 RelayoutTab：像某评测站那种首页，导航时会在
+            // HTML 到手和资源到手各排一次，单次约 2 秒，等于白冻一次。
+            // 图片会改尺寸、脚本可能改 DOM —— 这两件都没发生时不必重排。
+            bool images_attached = !raw->images.empty();
+            bool scripts_dirty = tab.page.RunScripts();
+            if (images_attached || scripts_dirty) {
+                RelayoutTab(idx);
+            }
             tab.title = tab.page.Data().title;
             if (idx == active_) {
                 std::wstring title = L"Zero Browser - " + Utf8ToWide(tab.title);

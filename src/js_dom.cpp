@@ -1683,7 +1683,7 @@ void JsRuntime::InstallGlobals() {
     interp_.AddGlobal("navigator", [&] {
         JsValue o = interp_.NewObject();
         o.obj->props["userAgent"] =
-            JsValue::Str("ZeroBrowser/0.1.3 (self-built engine)");
+            JsValue::Str("ZeroBrowser/0.1.5 (self-built engine)");
         o.obj->props["language"] = JsValue::Str("zh-CN");
         return o;
     }());

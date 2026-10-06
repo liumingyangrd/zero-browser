@@ -73,6 +73,12 @@ struct Style {
     std::string grid_column;            // 原始 grid-column 值
     std::string overflow = "visible";
     std::string white_space = "normal";
+    // float: none | left | right。名字不能叫 float（C++ 关键字）。
+    // 网格框架（洛谷用的 Amaze UI 等）整站分栏就靠它，不实现的话所有
+    // .am-u-md-* 列都退化成竖排块流，页面挤成一条窄栏。
+    std::string css_float = "none";
+    // clear: none | left | right | both
+    std::string clear = "none";
     int gap = 0;
     bool box_border_box = true;
     float opacity = 1.f;
@@ -660,6 +666,45 @@ inline std::map<std::string, std::string>& CssVars() {
 
 inline void CssVarsReset() { CssVars().clear(); }
 
+// --- 字号与 rem 基准 --------------------------------------------------------
+// 根元素（html）的字号，rem 的基准，浏览器默认 16px。页面若写了
+// html{font-size:62.5%}，rem 基准就跟着变，所以必须真的记下来。
+inline int& RootFontSize() {
+    static int px = 16;
+    return px;
+}
+
+// font-size 解析。这里曾经把所有非 px 的值都当成"无单位数字取整"，
+// 于是 CSS 里最常见的 1.4rem → (int)1.4 = 1px、1.6rem → 1px、2em → 2px：
+// 整站正文塌成一两个像素、所有行叠成一团黑。洛谷（Amaze UI）里 1.4rem
+// 出现 30 次，公告栏直接糊成一条。现在按 CSS 规则区分 px / % / em / rem / 关键字。
+inline int ParseFontSize(const std::string& raw, int parent_px) {
+    std::string v = Trim(raw);
+    if (v.empty()) return parent_px;
+    std::string lv = Lower(v);
+    float n = (float)std::atof(v.c_str());
+    auto scaled = [](float factor, int base) {
+        if (factor <= 0.f) return 0;  // font-size:0 是有意义的（常用于消掉空白）
+        return std::max(1, (int)std::lround(factor * base));
+    };
+    if (EndsWith(lv, "px")) return scaled(n, 1);
+    if (EndsWith(lv, "%")) return scaled(n / 100.f, parent_px);
+    // rem 必须排在 em 前面判断：两者都以 "em" 结尾。
+    if (EndsWith(lv, "rem")) return scaled(n, RootFontSize());
+    if (EndsWith(lv, "em")) return scaled(n, parent_px);
+    if (lv == "small") return 13;
+    if (lv == "x-small") return 10;
+    if (lv == "medium") return 16;
+    if (lv == "large") return 20;
+    if (lv == "x-large") return 24;
+    if (lv == "xx-large") return 32;
+    if (lv == "smaller") return std::max(1, (int)std::lround(parent_px * 0.8333f));
+    if (lv == "larger") return std::max(1, (int)std::lround(parent_px * 1.2f));
+    if (lv == "inherit" || lv == "unset" || lv == "initial") return parent_px;
+    if (n > 0.f) return scaled(n, parent_px);  // 非标准写法：按父级倍数处理
+    return parent_px;
+}
+
 // 替换 value 里的 var(--name[, fallback])，支持嵌套。
 inline std::string SubstituteVars(const std::string& value) {
     if (value.find("var(") == std::string::npos) return value;
@@ -794,15 +839,8 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
         if (s.border_width == 0) s.border_width = 1;
     }
     else if (name == "font-size") {
-        if (EndsWith(value, "px")) s.font_size = (int)std::atof(value.c_str());
-        else if (EndsWith(value, "%")) s.font_size = (int)(16 * std::atof(value.c_str()) / 100.0);
-        else if (value == "small") s.font_size = 13;
-        else if (value == "medium") s.font_size = 16;
-        else if (value == "large") s.font_size = 20;
-        else if (value == "x-large") s.font_size = 24;
-        else if (value == "smaller") s.font_size = std::max(1, s.font_size - 2);
-        else if (value == "larger") s.font_size = s.font_size + 2;
-        else s.font_size = (int)std::atof(value.c_str()) ?: 16;
+        // 基准是父元素字号（s 是从父样式拷来的，此刻还没被覆盖）。
+        s.font_size = ParseFontSize(value, s.font_size);
     }
     else if (name == "font-weight") {
         s.bold = value == "bold" || value == "bolder" ||
@@ -876,6 +914,8 @@ inline void ApplyDeclaration(Style& s, const std::string& name_raw,
         // 网格行暂时不显式建 track；由子项高度撑起。
     }
     else if (name == "grid-column") s.grid_column = Lower(value);
+    else if (name == "float") s.css_float = Lower(value);
+    else if (name == "clear") s.clear = Lower(value);
     else if (name == "overflow") s.overflow = Lower(value);
     else if (name == "gap") {
         if (EndsWith(value, "px")) s.gap = (int)std::atof(value.c_str());

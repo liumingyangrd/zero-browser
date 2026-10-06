@@ -41,7 +41,7 @@ const char* kHomeHtml = R"HTML(<!DOCTYPE html>
     <div class="card"><h3>脚本引擎</h3><p>自研 ES5 子集解释器：DOM 操作、事件冒泡、定时器。死循环与无限递归有护栏，脚本报错不影响页面渲染。</p></div>
     <div class="card"><h3>媒体与绘制</h3><p>图片/背景图经 WIC 解码、视频帧经 Media Foundation 解码，缩放、裁剪、合成与滚动全部自研。</p></div>
   </div>
-  <div class="foot">Zero Browser 0.1.4 · 自研渲染内核 · 页面由 zero-browser 渲染</div>
+  <div class="foot">Zero Browser 0.1.5 · 自研渲染内核 · 页面由 zero-browser 渲染</div>
 </body></html>
 )HTML";
 
@@ -120,7 +120,7 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
       <tr><td>布局引擎</td><td>内置（block / inline / flex / grid / position）</td></tr>
       <tr><td>传输与解码</td><td>WinHTTP / Media Foundation / WIC / WASAPI（仅底层管道）</td></tr>
       <tr><td>渲染</td><td>GDI 像素输出，无 WebView / Chromium</td></tr>
-      <tr><td>版本</td><td>0.1.4</td></tr>
+      <tr><td>版本</td><td>0.1.5</td></tr>
     </table>
   </div>
 </body></html>
@@ -471,6 +471,9 @@ Style ComputeStyle(const Node* node, const std::vector<CssRule>& rules,
     s.white_space = parent_style.white_space;
     s.positioned = false;
     s.left = {}; s.right = {}; s.top = {}; s.bottom = {};
+    // float / clear 不继承，必须显式复位（Style 是从父样式拷贝来的）。
+    s.css_float = "none";
+    s.clear = "none";
 
     for (const auto& rule : rules) {
         if (MatchesRule(node, rule)) {
@@ -512,6 +515,8 @@ Style ComputeStyle(const Node* node, const std::vector<CssRule>& rules,
         node->tag == "line" || node->tag == "polygon" || node->tag == "polyline") {
         s.display = "none";
     }
+    // 根元素字号就是 rem 的基准（页面可能写 html{font-size:62.5%}）。
+    if (node->tag == "html") RootFontSize() = s.font_size;
     return s;
 }
 
@@ -813,6 +818,13 @@ void CollectInline(const Node* node, Style parent,
         out.push_back(std::move(p));
         return;
     }
+    if (node->tag == "input" && Lower(node->Attr("type")) == "hidden") {
+        // input[type=hidden] 在浏览器 UA 样式里等同于 display:none。
+        // 真实登录页的 CSRF token 全是隐藏域，当成可见控件排版会把整页顶歪
+        // （实测：一个隐藏域就撑出 74x28 的空白，后面的控件全部下移）。
+        // 它仍然参与表单提交 —— 提交是遍历 DOM，不看布局。
+        return;
+    }
     if (node->tag == "input" || node->tag == "button" ||
         node->tag == "select" || node->tag == "textarea") {
         InlinePiece p;
@@ -830,16 +842,30 @@ void CollectInline(const Node* node, Style parent,
             p.widget_h = !s.height.is_auto
                              ? ResolveLength(s.height, container_w)
                              : (int)(fh * 4);
+            // textarea 的初值来自它的文本子节点。以前这里不设 widget_value，
+            // 于是 <textarea>正文</textarea> 渲染成一个空框，内容凭空消失。
+            p.widget_value = TextOf(node);
+            if (p.widget_value.empty()) {
+                p.widget_value = node->Attr("placeholder");
+            }
         } else {
+            std::string type =
+                node->tag == "input" ? Lower(node->Attr("type")) : std::string();
+            // 勾选类控件：画成小方框，不画 value。以前它落进 input 分支，
+            // 把 value="1" 当文字画在框里，复选框里显示着一个 "1"。
+            bool box_like = node->tag == "input" &&
+                            (type == "checkbox" || type == "radio");
             std::string v = node->tag == "button"
                                 ? Trim(TextOf(node))
                                 : node->Attr("value");
             if (node->tag == "input") {
-                std::string type = Lower(node->Attr("type"));
                 if (type == "submit" || type == "button" || type == "reset") {
                     p.widget = "button";
                     v = node->Attr("value");
                     if (v.empty()) v = type == "submit" ? "提交" : type;
+                } else if (box_like) {
+                    p.widget = type;  // checkbox / radio
+                    v.clear();
                 } else {
                     v = node->Attr("value");
                     if (v.empty()) v = node->Attr("placeholder");
@@ -854,10 +880,21 @@ void CollectInline(const Node* node, Style parent,
                 }
             }
             p.widget_value = v;
-            p.widget_w = !s.width.is_auto
-                             ? ResolveLength(s.width, container_w)
-                             : (int)std::max(60.0, p.widget_value.size() * 7.0 + 32);
-            p.widget_h = fh + 10;
+            if (box_like) {
+                // 没写尺寸时给一个复选框该有的大小，而不是按空文字的宽度算。
+                int side = std::max(12, (int)(fh * 0.85f));
+                p.widget_w = !s.width.is_auto ? ResolveLength(s.width, container_w)
+                                              : side;
+                p.widget_h = !s.height.is_auto
+                                 ? ResolveLength(s.height, container_w)
+                                 : side;
+            } else {
+                p.widget_w = !s.width.is_auto
+                                 ? ResolveLength(s.width, container_w)
+                                 : (int)std::max(60.0,
+                                                 p.widget_value.size() * 7.0 + 32);
+                p.widget_h = fh + 10;
+            }
         }
         out.push_back(std::move(p));
         return;
@@ -1082,7 +1119,9 @@ void PopulateBoxes(Box& parent, const std::vector<CssRule>& rules) {
     for (const auto& c : parent.node->children) {
         if (c->type != NodeType::Element) continue;
         Style s = ComputeStyle(c.get(), rules, parent.style);
-        if (!IsVisible(s) || !IsBlock(s)) continue;
+        // 浮动的行内元素（img/span 上写 float）也按块级盒子建盒，
+        // 否则它进不了浮动分栏这条路径。
+        if (!IsVisible(s) || !(IsBlock(s) || s.css_float != "none")) continue;
         auto child = std::make_unique<Box>();
         child->node = c.get();
         child->style = s;
@@ -1184,8 +1223,18 @@ void LayoutBlockFlow(Box& box, Canvas* canvas) {
         return d == "inline" || d == "inline-block";
     };
 
+    // ---- 浮动分栏状态（flush 也要用，所以先声明）----
+    int float_left_x = box.content.x;
+    int float_right_x = box.content.x + box.content.w;
+    int float_band_y = y;
+    int float_band_h = 0;
+    int float_bottom = y;
+
     auto flush = [&]() {
         if (buf.empty()) return;
+        // 行内内容同样要给已经摆好的浮动让位。少了这一步，浮动之后的行内文字
+        // 会被画在浮动的 y 上，两段内容直接叠在一起（洛谷的资讯列表就是这样）。
+        if (float_bottom > y) y = float_bottom;
         if (!marker_done && box.node && box.node->tag == "li") {
             Style ms = box.style;
             ms.bold = false;
@@ -1198,6 +1247,65 @@ void LayoutBlockFlow(Box& box, Canvas* canvas) {
         y += h;
         bottom = std::max(bottom, y - box.content.y);
         buf.clear();
+    };
+
+    // ---- 浮动分栏 ----
+    // 网格框架（洛谷用的 Amaze UI、很多 Bootstrap 时代的站）整站分栏就是
+    // <div class="row"><div class="col-8" style="float:left">…</div>…</div>。
+    // 不实现 float，这些列就会一个接一个竖排，整页挤成一条窄栏。
+    //
+    // 这里实现的是网格框架真正依赖的那部分语义：
+    //   1) 浮动盒脱离普通块流，在"当前浮动行"上左右依次摆放；
+    //   2) 当前行放不下就换到下一行（列宽都是百分比，正好是栅格折行）；
+    //   3) 容器高度包含浮动（等价 clearfix）—— 这些框架全都写了 clearfix，
+    //      不做这一步父容器就是 0 高，后面的内容会直接盖上来。
+    auto place_float = [&](Box& child) {
+        const Style& cs = child.style;
+        int ml = cs.MarginLeft();
+        int mr = cs.MarginRight();
+        int mt = cs.MarginTop();
+        int mb = cs.MarginBottom();
+        int w = cs.width.is_auto ? std::max(0, box.content.w - ml - mr)
+                                 : ResolveLength(cs.width, box.content.w);
+        w = ClampMaxWidth(cs, w, box.content.w);
+        int outer = w + ml + mr;
+        bool to_right = cs.css_float == "right";
+        // 放不下就折到下一行；只有当这一行已经有东西时才折。
+        bool line_used = float_left_x > box.content.x ||
+                         float_right_x < box.content.x + box.content.w;
+        if (outer > float_right_x - float_left_x && line_used) {
+            float_band_y += float_band_h;
+            float_band_h = 0;
+            float_left_x = box.content.x;
+            float_right_x = box.content.x + box.content.w;
+        }
+        int x = to_right ? float_right_x - mr - w : float_left_x + ml;
+        if (to_right) {
+            float_right_x -= outer;
+        } else {
+            float_left_x += outer;
+        }
+        child.rect.x = x;
+        child.rect.y = float_band_y + mt;
+        child.rect.w = w;
+        int border = BorderSize(cs);
+        child.content.x = child.rect.x + border + cs.PaddingLeft();
+        child.content.y = child.rect.y + border + cs.PaddingTop();
+        child.content.w = std::max(0, w - 2 * border - cs.PaddingLeft() -
+                                          cs.PaddingRight());
+        child.content.h =
+            cs.height.is_auto
+                ? 0
+                : std::max(0, ResolveLength(cs.height, box.content.h) -
+                                  2 * border - cs.PaddingTop() -
+                                  cs.PaddingBottom());
+        LayoutBox(child, canvas);
+        if (cs.height.is_auto) {
+            child.rect.h = child.content.h + 2 * border + cs.PaddingTop() +
+                           cs.PaddingBottom();
+        }
+        float_band_h = std::max(float_band_h, mt + child.rect.h + mb);
+        float_bottom = std::max(float_bottom, float_band_y + float_band_h);
     };
 
     if (box.node) {
@@ -1236,9 +1344,25 @@ void LayoutBlockFlow(Box& box, Canvas* canvas) {
             if (!is_inline_display(cs.display)) {
                 auto it = by_node.find(const_cast<Node*>(c));
                 if (it != by_node.end()) {
+                    // 浮动盒走分栏这条路径：脱离普通块流，不进 y。
+                    if (cs.css_float == "left" || cs.css_float == "right") {
+                        flush();
+                        place_float(*it->second);
+                        continue;
+                    }
                     // 绝对/固定定位的盒子不打断行内流（它脱离文档流）。
                     if (cs.position != "absolute" && cs.position != "fixed") {
                         flush();
+                        // 普通块流给已经摆好的浮动让位。严格 CSS 里不 clear 的
+                        // 块盒会和浮动重叠，但那样每个栅格后面都得再来一个
+                        // clearfix 才不出事 —— 而 clearfix 用的 ::after 伪元素
+                        // 本引擎还没有。这里直接按"块流自动避让浮动"处理，
+                        // 网格框架的观感才对。
+                        if (float_bottom > y) y = float_bottom;
+                        float_band_y = y;
+                        float_left_x = box.content.x;
+                        float_right_x = box.content.x + box.content.w;
+                        float_band_h = 0;
                     }
                     PlaceBlockChild(box, *it->second, y, bottom, canvas);
                     continue;
@@ -1249,6 +1373,8 @@ void LayoutBlockFlow(Box& box, Canvas* canvas) {
         }
     }
     flush();
+    // 容器高度必须包含浮动（等价 grid 框架里的 clearfix，见 place_float 的注释）。
+    if (float_bottom > y) y = float_bottom;
     box.content.h = std::max(box.content.h, y - box.content.y);
     box.scroll_height = box.content.h;
 }
@@ -1363,6 +1489,24 @@ void LayoutFlexRow(Box& box, Canvas* canvas) {
     }
     box.content.h = std::max(box.content.h, max_h);
     box.scroll_height = box.content.h;
+
+    // align-items 的默认值就是 stretch：交叉轴（行方向下是高度）拉伸到行高。
+    // 不实现它，内置主页那四张卡片就各高各的、卡片里的链接彼此错开一截 ——
+    // 这是打开浏览器第一眼就看得出来的"不像浏览器"。只拉伸 height:auto 的子项，
+    // 显式写了 height 的元素按自己的高度来。
+    if (box.style.align_items == "stretch") {
+        for (int i = 0; i < n; ++i) {
+            Box* child = box.children[i].get();
+            if (!child->style.height.is_auto) continue;
+            if (heights[i] >= max_h) continue;
+            int border = BorderSize(child->style);
+            child->rect.h = max_h;
+            child->content.h =
+                std::max(0, max_h - 2 * border - child->style.PaddingTop() -
+                                child->style.PaddingBottom());
+            heights[i] = max_h;
+        }
+    }
     if (box.style.align_items == "center" || box.style.align_items == "flex-end") {
         for (int i = 0; i < n; ++i) {
             int dy = box.style.align_items == "center"
@@ -1906,6 +2050,39 @@ void DrawWidget(Canvas* canvas, const TextRun& run, int dx, int dy) {
                          false, false, false);
         return;
     }
+    if (run.widget == "checkbox" || run.widget == "radio") {
+        // 勾选类控件画成方框/圆框，勾选状态看元素的 checked 属性。
+        // 它们不能走下面那套"白底 + 边框 + 文字"的输入框画法。
+        bool checked = run.node && run.node->HasAttr("checked");
+        bool round = run.widget == "radio";
+        int s = std::max(8, std::min(w, h));
+        int x = dx + (w - s) / 2;
+        int y = dy + (h - s) / 2;
+        if (round) {
+            // 用两个同心圆角矩形拼出圆环，省掉对 StrokeArc 的依赖。
+            canvas->FillRoundRect(x, y, s, s, s / 2, 0x64748b);
+            canvas->FillRoundRect(x + 1, y + 1, s - 2, s - 2, (s - 2) / 2,
+                                  checked ? 0x2563eb : 0xffffff);
+            if (checked) {
+                int d = std::max(2, s / 2);
+                canvas->FillRoundRect(x + (s - d) / 2, y + (s - d) / 2, d, d,
+                                      d / 2, 0xffffff);
+            }
+            return;
+        }
+        canvas->FillRect(x, y, s, s, checked ? 0x2563eb : 0xffffff);
+        canvas->StrokeRect(x, y, s, s, checked ? 0x2563eb : 0x64748b);
+        if (checked) {
+            int u = std::max(1, s / 6);
+            int cx = x + s / 2;
+            int cy = y + s / 2;
+            canvas->StrokeLine(cx - 2 * u, cy, cx - u / 2, cy + 2 * u, 0xffffff,
+                               u);
+            canvas->StrokeLine(cx - u / 2, cy + 2 * u, cx + 2 * u, cy - 2 * u,
+                               0xffffff, u);
+        }
+        return;
+    }
     int bg = run.widget_focused ? 0xfffbeb : 0xffffff;
     canvas->FillRect(dx, dy, w, h, bg);
     canvas->StrokeRect(dx, dy, w, h, run.widget_focused ? 0x6366f1
@@ -2239,6 +2416,8 @@ void Page::ParseHtml(const std::string& html, const std::string& url) {
     root_ = ::zb::ParseHtml(html);
     // CSS 变量表按页面重建：默认样式 + 页面样式依次收集，后定义覆盖先定义。
     CssVarsReset();
+    // rem 基准也按页面复位，避免上一页 html{font-size:...} 漏到下一页。
+    RootFontSize() = 16;
     rules_ = DefaultRules();
     int index = (int)rules_.size();
     CollectStyleRules(root_.get(), rules_, &index);

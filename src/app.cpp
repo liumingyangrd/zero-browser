@@ -420,6 +420,25 @@ std::string ResolveUrl(const std::string& base, const std::string& href_raw) {
                           : base_path.substr(0, last + 1);
     return origin + NormalizePath(dir + path_part) + query;
 }
+
+// 表单编码：x-www-form-urlencoded（空格用 +，其余非字母数字按 %XX）。
+std::string FormEncode(const std::string& v) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : v) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '*') {
+            out.push_back((char)c);
+        } else if (c == ' ') {
+            out.push_back('+');
+        } else {
+            out.push_back('%');
+            out.push_back(hex[c >> 4]);
+            out.push_back(hex[c & 0xF]);
+        }
+    }
+    return out;
+}
+
 std::string ErrorHtml(const std::string& url, const std::string& error) {
     std::string e = error.empty() ? "无法加载页面" : error;
     std::string escaped;
@@ -870,7 +889,9 @@ CookieChallenge DetectCookieChallenge(const std::string& html) {
 }
 
 bool LoadUrlSource(const std::string& raw_url, std::string* html,
-                   std::string* final_url, std::string* error) {
+                   std::string* final_url, std::string* error,
+                   const std::string& post_body = std::string(),
+                   const std::string& post_type = std::string()) {
     std::string u = NormalizeUrlInput(raw_url);
     if (u.empty() || StartsWith(u, "browser://") || StartsWith(u, "about:")) {
         *html = BuiltinHtml(u.empty() ? "home" : u);
@@ -912,7 +933,12 @@ bool LoadUrlSource(const std::string& raw_url, std::string* html,
     }
     if (StartsWith(u, "http://") || StartsWith(u, "https://")) {
         FetchResult res;
-        FetchUrlWithCookies(u, &res, 15000);
+        if (!post_body.empty()) {
+            // 表单 POST：登录这类"提交后再跳转"的流程靠它
+            FetchUrlPostWithCookies(u, post_body, post_type, &res, 15000);
+        } else {
+            FetchUrlWithCookies(u, &res, 15000);
+        }
         if (!res.html.empty()) {
             std::string final = res.final_url.empty() ? u : res.final_url;
             // 反爬挑战页（洛谷等）：响应是个小页面，脚本里设置 Cookie 再重载。
@@ -1027,6 +1053,63 @@ void BrowserApp::PumpMessages(int ms) {
 }
 
 namespace {
+
+// ---- 表单控件识别（点击定位与 Tab 换焦点共用同一套判断）----
+// 命中测试给出的节点不一定就是元素本身：自绘控件的文字是 run，其 run.node
+// 可能挂在控件的文本子节点上，所以要向上找到最近的控件元素。
+bool IsFormControlTag(const Node* n) {
+    return n && n->type == NodeType::Element &&
+           (n->tag == "input" || n->tag == "textarea" || n->tag == "select" ||
+            n->tag == "button");
+}
+
+Node* NearestControl(Node* n) {
+    for (Node* p = n; p; p = p->parent) {
+        if (IsFormControlTag(p)) return p;
+    }
+    return nullptr;
+}
+
+// 文本类控件：键盘输入与退格只对它们生效（select / checkbox / 按钮不吃字符）。
+bool IsTextControl(const Node* n) {
+    if (!n || n->type != NodeType::Element) return false;
+    if (n->tag == "textarea") return true;
+    if (n->tag != "input") return false;
+    std::string t = Lower(n->Attr("type"));
+    return !(t == "submit" || t == "button" || t == "image" || t == "reset" ||
+             t == "checkbox" || t == "radio" || t == "hidden" || t == "file");
+}
+
+// 可被 Tab 选中的控件：与浏览器一致地跳过 hidden / reset / button / file。
+bool IsFocusableControl(const Node* n) {
+    if (!n || n->type != NodeType::Element) return false;
+    if (n->tag == "textarea" || n->tag == "select" || n->tag == "button") {
+        return true;
+    }
+    if (n->tag != "input") return false;
+    std::string t = Lower(n->Attr("type"));
+    return !(t == "hidden" || t == "reset" || t == "button" || t == "file");
+}
+
+// 点它（或在它上面回车）会提交所属表单。
+bool IsSubmitControl(const Node* n) {
+    if (!n || n->type != NodeType::Element) return false;
+    std::string t = Lower(n->Attr("type"));
+    if (n->tag == "button") return t.empty() || t == "submit";
+    if (n->tag == "input") return t == "submit" || t == "image";
+    return false;
+}
+
+// 按 DOM 顺序收集整棵文档里的可聚焦控件。
+void CollectFocusable(const Node* n, std::vector<Node*>* out) {
+    if (!n || !out) return;
+    if (IsFocusableControl(n)) {
+        out->push_back(const_cast<Node*>(n));
+        // <button> 的子节点只是标签文本，没有可聚焦内容，不必再往下走。
+        return;
+    }
+    for (const auto& c : n->children) CollectFocusable(c.get(), out);
+}
 
 // 收集布局树里所有 <video> 盒子，供诊断输出精确坐标。
 void CollectVideoBoxes(const Box* box, std::vector<const Box*>* out) {
@@ -1276,16 +1359,65 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         std::printf("saved %s\n", opt.out.c_str());
     }
 
-    if (!opt.clicks.empty()) {
-        for (size_t i = 0; i < opt.clicks.size(); ++i) {
-            int cx = opt.clicks[i].first;
-            int cy = opt.clicks[i].second;
-            std::printf("== 模拟点击 %zu: (%d,%d) ==\n", i + 1, cx, cy);
-            OnLButtonDown(cx, cy);
+    if (!opt.actions.empty()) {
+        size_t clicks = 0;
+        for (const auto& act : opt.actions) {
+            if (act.kind == ShotOptions::Action::Kind::Click) {
+                ++clicks;
+                std::printf("== 模拟点击 %zu: (%d,%d) ==\n", clicks, act.x,
+                            act.y);
+                OnLButtonDown(act.x, act.y);
+                PumpMessages(opt.after_ms);
+                char tag[32];
+                std::snprintf(tag, sizeof(tag), "click%zu", clicks);
+                LogMediaState(tag);
+                continue;
+            }
+            if (act.kind == ShotOptions::Action::Kind::TypeField) {
+                // 逐字符走真实的 OnChar 路径：焦点在地址栏还是页面控件上，
+                // 决定了这段文本最后落进哪个输入框，正是要验的东西。
+                int typed = 0;
+                for (size_t i = 0; i < act.text.size();) {
+                    unsigned char c = (unsigned char)act.text[i];
+                    size_t len = 1;
+                    if (c >= 0xF0) len = 4;
+                    else if (c >= 0xE0) len = 3;
+                    else if (c >= 0xC0) len = 2;
+                    std::string one = act.text.substr(i, len);
+                    std::wstring wide = Utf8ToWide(one);
+                    for (wchar_t wc : wide) OnChar(wc);
+                    typed++;
+                    i += len;
+                }
+                std::printf("== 控件输入: %d 字符 ==\n", typed);
+                LogFieldState("type-field");
+                PumpMessages(120);
+                continue;
+            }
+            // Press：命名键走真实 OnKeyEx 路径（无窗口会话没有键盘，
+            // 修饰键必须显式传，所以 shift+tab 这样写）。
+            std::string k = Lower(act.text);
+            bool shift = StartsWith(k, "shift+");
+            if (shift) k = k.substr(6);
+            UINT key = 0;
+            if (k == "tab") key = VK_TAB;
+            else if (k == "enter") key = VK_RETURN;
+            else if (k == "escape" || k == "esc") key = VK_ESCAPE;
+            else if (k == "backspace") key = VK_BACK;
+            else if (k == "delete" || k == "del") key = VK_DELETE;
+            else if (k == "left") key = VK_LEFT;
+            else if (k == "right") key = VK_RIGHT;
+            else if (k == "home") key = VK_HOME;
+            else if (k == "end") key = VK_END;
+            if (!key) {
+                std::printf("== 按键: %s -> 未知键名，已跳过 ==\n",
+                            act.text.c_str());
+                continue;
+            }
+            std::printf("== 按键: %s ==\n", act.text.c_str());
+            OnKeyEx(key, false, shift);
+            LogFieldState("press");
             PumpMessages(opt.after_ms);
-            char tag[32];
-            std::snprintf(tag, sizeof(tag), "click%zu", i + 1);
-            LogMediaState(tag);
         }
         if (!opt.out2.empty()) {
             ok = shoot(opt.out2) && ok;
@@ -1740,6 +1872,17 @@ void BrowserApp::OnLButtonDown(int x, int y) {
         // 否则地址栏会一直显示用户敲了一半却没导航的文本。
         AddressClearSelection();
         SyncAddress();
+        // 点击到输入控件就把键盘焦点给它（表单与地址栏互斥）
+        Node* clicked_submit = nullptr;
+        if (active_ >= 0 && active_ < (int)tabs_.size()) {
+            TabState& ft = tabs_[active_];
+            const Node* hn = ft.page.NodeAt(x - page_view_.x,
+                                            y - page_view_.y + ft.scroll);
+            Node* fld = NearestControl(const_cast<Node*>(hn));
+            FocusField(fld, x - page_view_.x);
+            // 点到提交按钮就提交（回车提交走 OnKeyEx 那条分支）。
+            if (IsSubmitControl(fld)) clicked_submit = fld;
+        }
         // 先把点击交给页面脚本：处理器可能 preventDefault 掉默认动作
         // （比如 <a onclick="return false">），也可能自己发起导航。
         if (active_ >= 0 && active_ < (int)tabs_.size()) {
@@ -1762,6 +1905,12 @@ void BrowserApp::OnLButtonDown(int x, int y) {
                 }
                 if (js_dirty) InvalidateRect(hwnd_, nullptr, FALSE);
             }
+        }
+        // 页面脚本没有接管这次点击，才轮到表单的默认动作：提交按钮按下即提交。
+        if (clicked_submit) {
+            LogFieldState("click-submit");
+            SubmitFieldForm(clicked_submit, clicked_submit);
+            return;
         }
         if (active_ >= 0 && active_ < (int)tabs_.size()) {
             TabState& tab = tabs_[active_];
@@ -2052,6 +2201,73 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
         InvalidateRect(hwnd_, nullptr, FALSE);
         return;
     }
+    // Tab / Shift+Tab 在页面控件之间换焦点。放在表单分支之前：焦点还没落到
+    // 任何控件上时，第一次 Tab 应该选中页面里的第一个控件（与浏览器一致）。
+    if (key == VK_TAB && !address_focused_ && !ctrl) {
+        AdvanceFieldFocus(shift);
+        return;
+    }
+    // 表单焦点：编辑控件文本 / 回车提交 / Esc 取消焦点
+    if (!address_focused_ && active_ >= 0 && active_ < (int)tabs_.size() &&
+        tabs_[active_].field_focused && tabs_[active_].field) {
+        TabState& tab = tabs_[active_];
+        std::string cur = FieldText(tab.field);
+        size_t fc = (size_t)std::max(0, tab.field_caret);
+        if (fc > cur.size()) fc = cur.size();
+        fc = Utf8SnapToBoundary(cur, fc);
+        if (key == VK_RETURN) {
+            // 焦点在提交按钮上时回车等价于按下它（按钮的 name=value 要带上）。
+            SubmitFieldForm(tab.field,
+                            IsSubmitControl(tab.field) ? tab.field : nullptr);
+            return;
+        }
+        if (key == VK_ESCAPE) {
+            FocusField(nullptr, 0);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        // 剩下的都是文本编辑键：只有文本类控件吃它们。
+        if (!IsTextControl(tab.field)) return;
+        if (key == VK_BACK) {
+            if (fc > 0) {
+                size_t prev = Utf8PrevIndex(cur, fc);
+                cur.erase(prev, fc - prev);
+                tab.field_caret = (int)prev;
+                SetFieldText(tab.field, cur);
+            }
+            RelayoutActive();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        if (key == VK_DELETE) {
+            if (fc < cur.size()) {
+                size_t next = Utf8NextIndex(cur, fc);
+                cur.erase(fc, next - fc);
+                SetFieldText(tab.field, cur);
+            }
+            RelayoutActive();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+        if (key == VK_LEFT) {
+            tab.field_caret = (int)Utf8PrevIndex(cur, fc);
+            return;
+        }
+        if (key == VK_RIGHT) {
+            tab.field_caret = (int)Utf8NextIndex(cur, fc);
+            return;
+        }
+        if (key == VK_HOME) {
+            tab.field_caret = 0;
+            return;
+        }
+        if (key == VK_END) {
+            tab.field_caret = (int)cur.size();
+            return;
+        }
+        return;
+    }
+
     if (!address_focused_) return;
 
     size_t caret = (size_t)std::max(0, caret_);
@@ -2149,7 +2365,25 @@ void BrowserApp::OnKeyEx(UINT key, bool ctrl, bool shift) {
 }
 
 void BrowserApp::OnChar(wchar_t ch) {
-    if (!address_focused_ || ch < 32) return;
+    if (ch < 32) return;
+    // 表单输入：写进控件的值再重新布局，控件文字就会跟着变
+    if (!address_focused_ && active_ >= 0 && active_ < (int)tabs_.size()) {
+        TabState& tab = tabs_[active_];
+        if (tab.field_focused && tab.field && IsTextControl(tab.field)) {
+            std::string ins = WideToUtf8(std::wstring(1, ch));
+            std::string cur = FieldText(tab.field);
+            size_t caret = (size_t)std::max(0, tab.field_caret);
+            if (caret > cur.size()) caret = cur.size();
+            caret = Utf8SnapToBoundary(cur, caret);
+            cur.insert(caret, ins);
+            tab.field_caret = (int)(caret + ins.size());
+            SetFieldText(tab.field, cur);
+            RelayoutActive();
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return;
+        }
+    }
+    if (!address_focused_) return;
     // 走 AddressInsert：有选择区时先替换掉，插入点与边界处理只有一处实现。
     AddressInsert(WideToUtf8(std::wstring(1, ch)));
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -2204,6 +2438,169 @@ const TabState& BrowserApp::ActiveTab() const {
 std::string BrowserApp::CurrentUrl() const {
     if (tabs_.empty()) return "";
     return tabs_[active_].url;
+}
+
+std::string BrowserApp::FieldText(const Node* n) const {
+    if (!n) return "";
+    if (n->tag == "textarea") return NodeText(n);
+    if (n->tag == "select") {
+        for (const auto& c : n->children) {
+            if (c->type == NodeType::Element && c->tag == "option") {
+                return Trim(NodeText(c.get()));
+            }
+        }
+        return "";
+    }
+    return n->Attr("value");
+}
+
+void BrowserApp::SetFieldText(Node* n, const std::string& v) {
+    if (!n) return;
+    if (n->tag == "textarea") {
+        // textarea 的值是它的文本子节点（布局按文本渲染）
+        n->children.clear();
+        Node* t = MakeText(v);
+        t->parent = n;
+        n->children.emplace_back(t);
+        return;
+    }
+    n->attrs["value"] = v;
+}
+
+void BrowserApp::FocusField(Node* n, int click_x) {
+    // click_x 目前不参与定位：控件内部的精确插入点要按控件盒里的文字度量来算，
+    // 现在一律把插入点放在文本末尾，用户可以用 Home/End/左右键再调整。
+    (void)click_x;
+    TabState& tab = ActiveTab();
+    tab.field = n;
+    tab.field_focused = (n != nullptr);
+    tab.field_caret = (int)FieldText(n).size();
+    if (n) {
+        address_focused_ = false;  // 表单与地址栏互斥
+        AddressClearSelection();
+    }
+}
+
+bool BrowserApp::SubmitFieldForm(Node* field, Node* activated) {
+    Node* form = field;
+    while (form && !(form->type == NodeType::Element && form->tag == "form")) {
+        form = form->parent;
+    }
+    if (!form) {
+        LogStartup("[form] submit 忽略：控件不在 <form> 里");
+        return false;
+    }
+    std::string method = Lower(Trim(form->Attr("method")));
+    if (method.empty()) method = "get";
+    std::string action = Trim(form->Attr("action"));
+    std::string base = CurrentUrl();
+    std::string url = action.empty() ? base : ResolveUrl(base, action);
+
+    std::string body;
+    int fields = 0;
+    std::vector<const Node*> stack;
+    stack.push_back(form);
+    while (!stack.empty()) {
+        const Node* n = stack.back();
+        stack.pop_back();
+        // 子节点逆序入栈，弹出时才是文档顺序 —— 栈是后进先出，顺序反了会
+        // 让表单字段按倒序编码，服务端拿到的字段顺序与 HTML 规范不符。
+        for (auto it = n->children.rbegin(); it != n->children.rend(); ++it) {
+            stack.push_back(it->get());
+        }
+        if (n->type != NodeType::Element) continue;
+        if (n->tag != "input" && n->tag != "textarea" && n->tag != "select") {
+            continue;
+        }
+        std::string name = n->Attr("name");
+        if (name.empty()) continue;
+        std::string type = Lower(n->Attr("type"));
+        // 按钮类控件本身不进表单数据：只有"被按下的那一个"按规范补在最后。
+        if (n->tag == "input" &&
+            (type == "submit" || type == "button" || type == "image" ||
+             type == "reset" || type == "file")) {
+            continue;
+        }
+        // 未勾选的 checkbox / 未选中的 radio 不提交。
+        if ((type == "checkbox" || type == "radio") && !n->HasAttr("checked")) {
+            continue;
+        }
+        std::string value = FieldText(n);
+        // 勾上了但没写 value 的 checkbox/radio，按规范提交 "on"。
+        if ((type == "checkbox" || type == "radio") && value.empty()) {
+            value = "on";
+        }
+        if (!body.empty()) body += "&";
+        body += FormEncode(name) + "=" + FormEncode(value);
+        fields++;
+    }
+    // 被按下/被回车激活的提交按钮：只有带 name 才进表单数据。
+    if (activated) {
+        std::string an = activated->Attr("name");
+        if (!an.empty()) {
+            if (!body.empty()) body += "&";
+            body += FormEncode(an) + "=" + FormEncode(activated->Attr("value"));
+            fields++;
+        }
+    }
+
+    // 隐藏域（CSRF token 这类）也算字段，提交前必须能在日志里看见。
+    LogStartup("[form] submit method=" + method + " fields=" +
+               std::to_string(fields) + " bytes=" +
+               std::to_string(body.size()) + " action=" + url);
+    if (method == "post") {
+        post_pending_body_ = body;
+        post_pending_type_ = "application/x-www-form-urlencoded";
+        NavigateTo(url, true);
+    } else {
+        if (!body.empty()) {
+            url += (url.find('?') == std::string::npos ? "?" : "&") + body;
+        }
+        NavigateTo(url, true);
+    }
+    return true;
+}
+
+// Tab / Shift+Tab：按 DOM 顺序在可聚焦控件之间移动焦点。
+// 焦点还没落在控件上时，正向 Tab 选第一个、反向 Shift+Tab 选最后一个。
+bool BrowserApp::AdvanceFieldFocus(bool backward) {
+    if (active_ < 0 || active_ >= (int)tabs_.size()) return false;
+    TabState& tab = tabs_[active_];
+    std::vector<Node*> controls;
+    CollectFocusable(tab.page.RootNode(), &controls);
+    if (controls.empty()) return false;
+
+    int cur = -1;
+    for (size_t i = 0; i < controls.size(); ++i) {
+        if (controls[i] == tab.field) {
+            cur = (int)i;
+            break;
+        }
+    }
+    int next = 0;
+    if (cur >= 0) {
+        int n = (int)controls.size();
+        next = backward ? (cur - 1 + n) % n : (cur + 1) % n;
+    } else if (backward) {
+        next = (int)controls.size() - 1;
+    }
+    address_focused_ = false;
+    FocusField(controls[next], -1);
+    RelayoutActive();
+    InvalidateRect(hwnd_, nullptr, FALSE);
+    return true;
+}
+
+// 把页面表单焦点的状态打成一行：--shot 的表单回归靠这一行取证。
+void BrowserApp::LogFieldState(const char* tag) const {
+    if (active_ < 0 || active_ >= (int)tabs_.size()) return;
+    const TabState& tab = tabs_[active_];
+    const Node* f = tab.field;
+    std::printf(
+        "[form] %s focused=%d node=%s type=%s name='%s' caret=%d value='%s'\n",
+        tag, tab.field_focused ? 1 : 0, f ? f->tag.c_str() : "-",
+        f ? f->Attr("type").c_str() : "-", f ? f->Attr("name").c_str() : "-",
+        tab.field_caret, f ? FieldText(f).c_str() : "");
 }
 
 std::string BrowserApp::DisplayUrl() const {
@@ -2331,13 +2728,19 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
     caret_ = (int)address_text_.size();
     InvalidateRect(hwnd_, nullptr, FALSE);
 
+    std::string post_body = post_pending_body_;
+    std::string post_type = post_pending_type_;
+    post_pending_body_.clear();
+    post_pending_type_.clear();
+
     HWND hwnd = hwnd_;
-    std::thread([hwnd, tab_index, seq, target, add_history]() {
+    std::thread([hwnd, tab_index, seq, target, add_history, post_body,
+                 post_type]() {
         std::string html;
         std::string final_url;
         std::string error;
         ULONGLONG t0 = GetTickCount64();
-        LoadUrlSource(target, &html, &final_url, &error);
+        LoadUrlSource(target, &html, &final_url, &error, post_body, post_type);
         ULONGLONG t1 = GetTickCount64();
         std::string res_base = final_url.empty() ? target : final_url;
         double ms_html = (double)(t1 - t0);

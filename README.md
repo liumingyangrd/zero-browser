@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.4-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.5-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -26,8 +26,10 @@ HTML 解析、CSS 选择器与样式计算、盒模型布局、文本排版、�
 `Shift`+方向键 / `Ctrl+A` / 双击全选）与剪贴板（`Ctrl+C/X/V`、`Shift+Insert`、
 右键菜单）都在自绘外壳里完成。
 CSS 支持标签 / 类 / id / 后代 / `>` / 逗号分组 / `*` / **属性选择器** / **结构伪类**，
-布局支持块级文档流、行内文本换行（中文逐字断行）、flex 行与列、**CSS Grid**、
+布局支持块级文档流、行内文本换行（中文逐字断行）、flex 行与列（含默认的
+`align-items: stretch` 等高拉伸）、**CSS Grid**、**`float` / `clear` 分栏**、
 **`position: relative / absolute / fixed` + `z-index`**、表格行、列表、`<pre>`。
+字号按 CSS 规则处理 `px` / `%` / `em` / `rem`（`rem` 基准跟随 `html` 的 `font-size`）。
 
 ### 图片与背景图（WIC 解码字节为像素）
 
@@ -147,32 +149,56 @@ CSS 支持标签 / 类 / id / 后代 / `>` / 逗号分组 / `*` / **属性选择
 
 `input`（`text` / `password` / `submit` / `button` / `reset`）、`button`、`select`、`textarea`
 按控件外观绘制，显示 `value` / `placeholder` / `option` 文本，并支持聚焦高亮。
+`input[type="hidden"]` 与浏览器一致地不占布局（真实登录页的 CSRF 隐藏域不再顶歪页面）。
 
 ![表单控件](docs/screenshots/forms.png)
 
-> 当前只做到**渲染**：还不能在输入框里打字、不能提交表单（见[尚未实现](#尚未实现)）。
+**交互**（自绘，不依赖系统 `EDIT` 控件）：
+
+- 点控件获得键盘焦点，焦点与地址栏互斥；`Esc` 放弃焦点。
+- 打字、`Backspace` / `Delete`、`←` / `→` / `Home` / `End` 按**码点**编辑文本。
+- `Tab` / `Shift+Tab` 按 DOM 顺序在控件间移动焦点，循环回绕。
+- `Enter`（或点击 `input[type=submit]` / `<button>`）提交所属 `<form>`：
+  `GET` 拼查询串，`POST` 走请求体（`application/x-www-form-urlencoded`），
+  字段按**文档顺序**编码，隐藏域照常提交，被按下的提交按钮追加在末尾，
+  未勾选的 `checkbox` / `radio` 不提交。`<button type="button">` 不提交。
+
+> `select` 目前只显示当前选项，**还没有下拉列表**；控件内点击定位插入点也还是
+> 简单地把插入点放到末尾（用 `Home` / `End` / 左右键调整）。
 
 ### 真实站点
 
 优化了资源加载（并行 + 会话复用）、CSS 解析（`@media` 嵌套块）、长度解析
-（`max-content` / `calc()` / `vh` 等，之前会被解析成 0 导致整页宽度为 0）之后，
-可以直接打开真实网站并读到内容：
+（`max-content` / `calc()` / `vh` 等，之前会被解析成 0 导致整页宽度为 0），
+再加上 **`float` 分栏**与 **`rem`/`em` 字号**之后，可以直接打开真实网站：
 
-| 站点 | 结果 |
+| 站点类型 | 结果 |
 | --- | --- |
-| **B 站** `https://www.bilibili.com/` | 顶部导航、频道分类、视频卡片标题 / UP 主 / 日期均可读 |
-| **洛谷** `https://www.luogu.com.cn/` | 先识别并完成「JS 设置 Cookie 后重载」的反爬挑战，再渲染出 banner、倒计时、题单入口 |
+| 某大型视频站 | 顶部导航、频道分类**四列**、视频列表标题 / UP 主 / 日期均可读 |
+| 某算法竞赛评测站 | 先识别并完成「JS 设置 Cookie 后重载」的反爬挑战，再渲染出 banner、倒计时、跳题框，以及**近期比赛 / 本站公告两栏** |
 
-![B 站首页](docs/screenshots/bilibili.png)
+![某大型视频站首页](docs/screenshots/real-site-video.png)
 
-![洛谷首页](docs/screenshots/luogu.png)
+![某算法竞赛评测站首页](docs/screenshots/real-site-judge.png)
+
+> 这里一律不写具体站点名——**发布说明、README 都不点名**，只说"某视频站""某评测站"。
+
+> **某评测站有两套界面，看到哪一套很关键。** 它的 HTML 里同时有空的
+> `<div id="app"></div>` 和装着旧服务器端标记的 `<div id="app-old">`（Amaze UI 栅格）。
+> 主流浏览器展示的是 **Vue 3 渲染进 `#app` 的新界面**——那需要跑得动 235KB 的
+> webpack 产物，本项目自研的 ES5 子集解释器做不到（没有 `Promise` / 模块 / 正则等），
+> 所以本浏览器展示的是 **`#app-old` 这份旧标记**。**这是 JS 的能力边界，不是排版 bug。**
+>
+> 旧标记本身现在是**排版正常**的：它的 `.am-u-md-*` 栅格靠 `float: left` 分栏，
+> 在实现 `float` 之前所有列都会退化成竖排块流、整页挤成一条窄栏。
 
 > 这两张是**真实抓取**的结果，不是本地仿制页。版式仍比 Edge 粗糙，原因见
 > [尚未实现](#尚未实现)：脚本子集覆盖面有限，也没有 `fetch` / `XHR`，因此强依赖接口
 > 与完整语言特性的交互（登录、播放、无限下拉）仍然不可用。
 >
-> 上面两张图是 **0.1.3 及更早**（还没有 JS 支持）时的取证结果。0.1.4 起
-> `<script>` 会真正执行，见上面的 [JavaScript 章节](#javascript自研-es5-子集解释器)。
+> 截图随版本更新：**0.1.5 起**用当前构建重新抓取（已经有了 `float` 分栏与
+> `rem`/`em` 字号）。0.1.4 起 `<script>` 会真正执行，见上面的
+> [JavaScript 章节](#javascript自研-es5-子集解释器)。
 
 ---
 
@@ -194,24 +220,41 @@ CSS 支持标签 / 类 / id / 后代 / `>` / 逗号分组 / `*` / **属性选择
 
 ## 构建
 
-需要 32 位 MinGW g++（开发机为 `D:\Dev-Cpp\MinGW32`，g++ 10.2）。
+需要一个带 `g++` 的 MinGW（开发机是 Embarcadero Dev-Cpp 自带的
+`C:\Program Files (x86)\Embarcadero\Dev-Cpp\TDM-GCC-64`，TDM-GCC 9.2）。
+`build.bat` 会优先用 `PATH` 里的 `g++`，找不到就按几个已知位置补进 `PATH`。
 
 ```bat
 cd zero-browser
 build.bat
 ```
 
-产物：`build\zero-browser.exe`
+一次产出**两个架构**：
+
+```
+build\zero-browser.exe       32 位（x86，PE32）   约 3.8 MB
+build\zero-browser-x64.exe   64 位（x64，PE32+）  约 4.5 MB
+```
 
 脚本默认**静态链接**（`-static -static-libgcc -static-libstdc++`），产出单个免依赖 exe
-（约 2.7 MB），除系统 DLL 外不需要额外运行库：
+（大小视工具链版本而定），除系统 DLL 外不需要额外运行库：
 
 ```
 GDI32 / USER32 / KERNEL32 / msvcrt / ole32 / MSIMG32 / WINHTTP / MFPlat / MFReadWrite
 ```
 
-链接库（`build.bat` 已包含）：`gdi32 winhttp mfplat mfreadwrite mfuuid ole32 uuid mmdevapi
-strmiids ksuser avrt windowscodecs msimg32`。
+链接库（`build.bat` 已包含）：`gdi32 winhttp mfplat mfuuid ole32 uuid strmiids ksuser
+avrt windowscodecs msimg32`，外加 `mfreadwrite` 的导入库。
+
+> 两个工具链差异要注意：
+> - **`mfreadwrite` 的导入库不总是随 MinGW 一起装**。本项目只用到
+>   `MFCreateSourceReaderFromByteStream` 一个导出，所以 `build.bat` 先用
+>   `g++ --print-file-name=libmfreadwrite.a` 探测；TDM-GCC 的 multilib 只装了头文件、
+>   没有这个 `.a`，于是回退到 Windows SDK 的同名导入库（`Windows Kits\10\Lib\<版本>\um\<架构>\`）。
+> - `-D_WIN32_WINNT=0x0601`：老一点的 MinGW 头文件默认值偏低，不开这个
+>   `GetTickCount64` 不会声明。
+> - 链接前会先 `taskkill` 掉残留的 `zero-browser*.exe`：进程活着时链接会报
+>   `cannot open output file ...: Permission denied`。
 
 > `src\media.cpp` 与 `src\audio_out.cpp` 必须**分开编译**：MinGW 的 `ksmedia.h` 与 MF 的
 > strmif 头会重复定义 `TIMECODE_SAMPLE` / `DDPIXELFORMAT`，详见[踩过的坑](#踩过的坑改动前请先读)。
@@ -238,6 +281,13 @@ build\zero-browser.exe https://example.com/
 python -m http.server 8765 --directory testpage
 ```
 
+表单提交要能回显服务端收到了什么，所以另有一个探针服务器（静态目录一样是
+`testpage/`，额外提供 `GET`/`POST /echo` 回显）：
+
+```bat
+python tools\form_server.py 8902
+```
+
 ---
 
 ## 启动不了怎么排查
@@ -249,8 +299,8 @@ python -m http.server 8765 --directory testpage
 1. **文件是不是完整的？** 在文件所在目录用 PowerShell 核对（大小与 SHA256 见
    [Releases](https://github.com/liumingyangrd/zero-browser/releases) 页面）：
    ```powershell
-   $f = ".\zero-browser-v0.1.4-win32.exe"
-   (Get-Item $f).Length                                          # 应为 3515113
+   $f = ".\zero-browser-v0.1.5-win32.exe"
+   (Get-Item $f).Length                                          # 应为 3996442
    (Get-FileHash $f -Algorithm SHA256).Hash
    [BitConverter]::ToString([IO.File]::ReadAllBytes($f)[0..1])   # 应为 4D-5A（"MZ"）
    ```
@@ -258,9 +308,9 @@ python -m http.server 8765 --directory testpage
    存成了 .exe 等）——重新下载即可。实测踩到过一次：下载下来的是 **0 字节**文件。
 2. **文件被锁定了吗？** 右键文件 → 属性 → 底部若有「解除锁定」就勾上；并把文件从
    OneDrive / 映射盘 / 压缩包预览里**复制到本地普通目录**（例如 `C:\zb\`）再运行。
-3. **机器是 ARM 架构吗？** 本包是 32 位 x86（`PE32 / i386`）可执行文件，在 Windows on
-   ARM 上需要 x86 模拟层；模拟不可用或被策略关闭时，Windows 报的就是这句话。
-   可在「设置 → 系统 → 关于 → 系统类型」查看。
+3. **机器是 ARM 架构吗？** 32 位包是 `PE32 / i386`，64 位包是 `PE32+ / AMD64`。
+   在 Windows on ARM 上跑 32 位包需要 x86 模拟层；模拟不可用或被策略关闭时，
+   Windows 报的就是这句话。可在「设置 → 系统 → 关于 → 系统类型」查看。
 
 ## 诊断与取证
 
@@ -283,14 +333,47 @@ build\zero-browser.exe --shot --url http://127.0.0.1:8765/video2.html ^
     --out build\a.bmp --out2 build\b.bmp ^
     --click 512,330 --click 678,493 --wait 1200 --after 600
 
-:: 图片 / 背景图 / grid / 表单
+:: --click / --type-field TEXT / --press NAME 按**命令行给出的顺序**统一排队执行，
+:: 所以可以表达「点控件 → 打字 → 再点下一个 → 回车提交」这种多步流程。
+:: --press 支持 tab / shift+tab / enter / escape / backspace / delete / left /
+:: right / home / end。注意 --type 是地址栏专用的，测页面控件要用 --type-field。
+
+:: 图片 / 背景图 / grid / 表单 / float 分栏
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/images.html   --out build\img.bmp --wait 1500 --size 1100x1900
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/grid.html     --out build\grid.bmp --wait 1200 --size 1100x1000 --dump-boxes
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/forms.html    --out build\forms.bmp --wait 1200 --size 900x760 --dump-boxes
+::   float 分栏回归（期望 content_height=619；没有 float 时所有列会竖排，数值明显变大）
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/floats.html   --out build\floats.bmp --wait 1200 --size 1100x1200 --dump-boxes
+
+:: 表单交互回归。--click / --type-field / --press 按命令行顺序执行，所以
+:: 「点控件 → 打字 → 回车提交」是一条链。先开表单探针服务器：
+python tools\form_server.py 8902
+::   控件输入 + Tab 换焦点（期望每次 [form] press 的 node 依次为
+::   input(text) → input(password) → textarea → select → button → input(submit)）
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/forms.html ^
+    --out build\ft.bmp --wait 1500 --size 900x760 ^
+    --click 311,240 --type-field "-OK" --press tab --press tab --press shift+tab
+::   期望：[form] type-field value='zero-user-OK'；shift+tab 回到上一个控件
+:: 回车提交 POST 表单（期望回显页出现
+::   method=POST 与 body=csrf=tok-42&user=zero-user-X&pass=secret123&remember=1）
+build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
+    --out build\fp.bmp --wait 1500 --size 900x900 --dump-boxes ^
+    --click 311,203 --type-field "-X" --press enter
+:: 点提交按钮提交（期望 body 末尾追加 &do=login —— 被按下的按钮带 name 才提交）
+build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
+    --out build\fb.bmp --wait 1500 --size 900x900 --dump-boxes ^
+    --click 311,203 --type-field "-X" --click 208,319
+:: GET 表单（期望 query=q=%E8%87%AA%E7%A0%94%E5%86%85%E6%A0%B8-Y&go=%E6%90%9C%E7%B4%A2）
+build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
+    --out build\fg.bmp --wait 1500 --size 900x900 --dump-boxes ^
+    --click 311,499 --type-field "-Y" --click 512,499
+:: <button type="button"> 不提交（期望输出里没有 [form] click-submit）
+build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
+    --out build\fc.bmp --wait 1500 --size 900x900 --dump-boxes --click 286,319
 
 :: 网络诊断（注意：URL 直接跟在 --net-test 后面；第三个参数可选，把正文导出成文件）
 build\zero-browser.exe --net-test http://example.com/
-build\zero-browser.exe --net-test https://www.bilibili.com/ build\bili.html
+build\zero-browser.exe --net-test https://example.com/ build\page.html
 
 :: 地址栏输入回归（走真实的 OnChar / OnKey 路径，覆盖「输入即崩溃」这类问题）
 ::   --set-address "\empty"  表示清空地址栏
@@ -414,9 +497,26 @@ build\js_probe.exe --robust
 - 图片：PNG / JPEG / GIF / 透明 PNG 解码绘制，flex 行内图片基线对齐，
   `width:100%` 保持宽高比，破图显示 `alt`，`background-size: cover / contain` 裁剪在盒内
 - Grid：`repeat(3, 1fr)` 三列等宽、`180px 1fr 1fr` 固定列 + 等分列、`span 2` 跨列、`auto auto`
+- flex 默认 `align-items: stretch`：内置主页四张卡片等高、卡片内链接对齐（改前高度各随内容）
+- float 分栏：某评测站首页的 Amaze UI 栅格（`.am-g` + `.am-u-md-8` / `.am-u-md-4`）正确并排；
+  改前所有列退化成竖排块流、整页挤成一条窄栏。同一次抓取里 `content_height` 从 5579 降到
+  4694（竖着堆 → 并排）就是直接证据
+- 字号：`1.4rem` / `.875em` / `80%` 按 CSS 规则解析；改前某评测站的公告栏字号塌到 1~2px、
+  613 个字符 run 全挤在同一个 y 上糊成一团，修好后才恢复成可读的列表
+
+> 真实站点的 `content_height` 会随站点内容变化，**不能当回归基准**。
+> 上面两条只是"改对了"的旁证；确定性的回归用本地 `testpage/floats.html`
+> （命令见 [诊断与取证](#诊断与取证)）。
 - position：滚动 780px 后 fixed 导航栏与悬浮块仍在视口原位，盒内文字随盒定位
 - 表单：`input` / `select` / `textarea` / `button` 渲染出正确尺寸与值，`input[type="text"]`
   的属性选择器只命中文本框（提交按钮保持自适应宽度）
+- 表单提交端到端（`tools/form_server.py` + `testpage/formsubmit.html`，`--shot --dump-boxes`
+  读服务端回显页）：回车提交 `POST` 得到
+  `body=csrf=tok-42&user=zero-user-X&pass=secret123&remember=1`（**文档顺序**、隐藏域参与、
+  未按下的按钮不带入），点提交按钮变成 `...&do=login`，`GET` 表单得到
+  `query=q=%E8%87%AA%E7%A0%94%E5%86%85%E6%A0%B8-Y&go=%E6%90%9C%E7%B4%A2`，
+  `<button type="button">` 不提交；`Tab` 依次经过
+  `input(text) → input(password) → textarea → select → button → input(submit)`
 - Cookie：`--cookie-test` 输出 `echo_body=Cookie: auth=abc123; pref=dark`，`jar_size=2`
 - 网络：显式 `ZB_PROXY=http://127.0.0.1:7890` 可抓取 `http://example.com`
 - **JavaScript**（`--shot` 无窗口实测，脚本内容与布局都按真实路径取证）：
@@ -439,12 +539,12 @@ build\js_probe.exe --robust
     `build\js_probe.exe --robust` **13 条健壮性用例全过**（死循环、无限递归、语法错误、
     `null` 属性、调用非函数、`catch` 恢复等）
   - 加了 JS 之后页面回归不受影响：index 577 / images 1861 / grid 467 / forms 469 /
-    flexblocks 233 / video2 864 / position 1200
+    flexblocks 233 / video2 864 / position 1200 / floats 619
 - **与 Edge 对标**（同一本地页面、同一窗口宽度，用 `tools/compare_render.py` 比行/列内容带）：
   第一条内容带位置**完全重合**（相对 y 22–40 vs Edge 22–40），后续每段高度差约 6px；
   字号按像素修正前，每行要高出 10–12px（根因是 `font-size` 被当成 pt 折算，见踩坑第 23 条）
 - 本地页面回归（`--shot` 实测 content_height）：images 1861 / grid 467 / position 1200 /
-  forms 469 / flexblocks 233 / video2 864 / index 577
+  forms 469 / flexblocks 233 / video2 864 / index 577 / floats 619
 
 > 如果 `https://` 抓取失败并报 `Win32 错误 12185`（`ERROR_WINHTTP_CANNOT_CONNECT`），
 > 通常是**当前环境的网络策略阻断了 TLS/CONNECT**，不是浏览器代码问题；
@@ -545,12 +645,17 @@ build\js_probe.exe --robust
 - 透明 PNG 半透明合成；破图按 `alt` 绘制占位框
 - `background-size: contain / cover / auto / stretch`，裁剪在盒内
 - **懒加载兜底**：`src` 为占位图时依次回退 `data-src` / `data-original` /
-  `data-lazy-src` / `srcset`（B 站等站点缩略图靠这个才出得来）
+  `data-lazy-src` / `srcset`（大型视频站等站点的缩略图靠这个才出得来）
 - 缩小用 HALFTONE 平滑缩放（与 Chromium 的缩略图观感一致），放大用 COLORONCOLOR 保边缘
 
-**表单（仅渲染）**
-- `input`（`text`/`password`/`submit`/`button`/`reset`）、`button`、`select`、`textarea`
+**表单（渲染 + 交互）**
+- `input`（`text`/`password`/`submit`/`button`/`reset`/`checkbox`/`hidden`）、
+  `button`、`select`、`textarea`
 - 显示 `value` / `placeholder` / 首个 `option` 文本，支持聚焦高亮与自适应宽度
+- `input[type="hidden"]` 不占布局（CSRF 隐藏域不再顶歪页面）
+- 点击聚焦、按码点编辑文本、`Tab`/`Shift+Tab` 换焦点
+- `Enter` 或点击提交按钮提交 `<form>`：`GET` 查询串 / `POST` 请求体，
+  字段按文档顺序编码，隐藏域参与提交，被按下的提交按钮追加在末尾
 
 ---
 
@@ -570,11 +675,18 @@ build\js_probe.exe --robust
   通过 `innerHTML` 插入的 `<style>` **不会生效**
 - **脚本兜底仍保留**：懒加载缩略图的静态兜底（`src` 是占位图时回退 `data-src` /
   `data-original` / `data-lazy-src` / `srcset`）与**反爬挑战页**（识别「JS 设置 Cookie
-  后重载」这一固定写法并模拟，洛谷就是靠它进去的）都还在，不因有了 JS 而删除
+  后重载」这一固定写法并模拟，某评测站就是靠它进去的）都还在，不因有了 JS 而删除
 - **流媒体**：HLS / DASH / m3u8 分片拉流未实现，目前只支持直链媒体文件
-- **表单交互**：控件能渲染，但还不能输入文字、聚焦切换、提交表单（无 `form` 提交与 `Enter` 行为）
-- **CSS 进阶**：`float`、`position: sticky`、`transform`/`transition`/`animation`、
-  `flex-wrap`、伪元素 `::before`/`::after`（`@media` 已支持桌面宽度分支）
+- **表单交互还不完整**：能输入、能换焦点、能提交 `GET`/`POST`，但 `<select>` **没有
+  下拉列表**（只显示当前选项）；控件内的插入点定位只做到"放到末尾"；不支持
+  `enctype="multipart/form-data"`（文件上传）、`formnovalidate`、表单校验与 `:invalid`；
+  `input[type=checkbox]` 点击不切换勾选状态
+- **CSS 进阶**：`position: sticky`、`transform`/`transition`/`animation`、`flex-wrap`、
+  `vertical-align`、伪元素 `::before`/`::after`（`@media` 已支持桌面宽度分支）
+- **`float` 是有意简化的子集**：按"浮动盒同行并排、放不下换行、容器高度包含浮动
+  （等价 clearfix）"实现，够跑通网格框架；但普通块流会**自动避让**浮动，而不是像
+  严格 CSS 那样可以与之重叠，行内文字也还没有"绕排浮动图片"的效果。
+  `clear` 属性被解析但未单独生效（块流一律避让）。
 - **定位精度**：`absolute` 目前以**父盒 content box** 为基准，尚未严格实现"最近 positioned 祖先"
 - **图片进阶**：GIF 动图只显示第一帧；`<canvas>`、`<svg>`、`srcset`、`object-fit` 未实现
 - **状态与存储**：没有 localStorage、HTTP 缓存、下载管理、书签持久化
@@ -645,9 +757,9 @@ zero-browser/
     media.cpp / .h         Media Foundation 播放器（解码、时间轴、跳转）
     audio_out.cpp / .h     WASAPI 音频输出
   docs/screenshots/        README 截图（PNG）
-  testpage/                本地验证页面（图片、grid、flex、position、表单、视频、外链 CSS、JS）
+  testpage/                本地验证页面（图片、grid、flex、float 分栏、position、表单、表单提交、视频、外链 CSS、JS）
   testmedia/               测试片源
-  tools/                   探针与取证工具（含 cookie_server.py、js_probe.cpp、js_selftest.js）
+  tools/                   探针与取证工具（含 cookie_server.py、form_server.py、js_probe.cpp、js_selftest.js）
 ```
 
 ---
@@ -783,6 +895,27 @@ zero-browser/
 34. **剪贴板可能被别的进程占用。** `OpenClipboard` 失败时 `GetLastError` 是 5（拒绝访问），
     此时连 PowerShell 自己的 `Set-Clipboard` 也会失败。程序必须把这种情况当
     **"操作失败"如实报告**，而不是崩溃或静默写坏数据。
+35. **`font-size` 不能把 `1.4rem` 当成"1.4 取整"。** 原来的实现是
+    `(int)std::atof(value)`，于是 `1.4rem` → `1px`、`1.6rem` → `1px`、`2em` → `2px`：
+    整站正文塌成一两个像素、几百行文字在同一个 y 上叠成一团黑。
+    某评测站用的那套网格框架里 `1.4rem` 出现 30 次，公告栏直接糊掉。必须按 CSS 规则区分
+    `px` / `%` / `em` / `rem`，而且 `rem` 的基准要真的跟随 `html` 的 `font-size`
+    （页面常写 `html{font-size:62.5%}`）。顺手去掉了一个 GNU 扩展 `?:`——
+    MSVC 编译不过。
+36. **`float` 不是"可选特性"，是很多站点的地基。** Bootstrap 时代与 Amaze UI
+    这一代网格框架全靠 `float: left` + 百分比宽度分栏，再用 `:before/:after`
+    的 clearfix 让父容器包含浮动。缺了 `float`，`.am-u-md-8` / `.am-u-md-4`
+    这类列会全部退化成竖排块流，整页挤成一条窄栏 —— 看起来像"排版崩了"，
+    实际只差这一个属性。同理，浮动之后的**行内内容**也要先让位，
+    否则会直接画在浮动上面（两段文字叠在一起）。
+37. **`align-items` 的默认值是 `stretch`，不是"什么都不做"。** flex 行只实现了
+    `center` / `flex-end`，默认值没走任何分支，于是卡片高度各随内容。
+    内置主页那四张卡片和卡片里的链接会因此错开一截，是打开浏览器第一眼就看得到的差异。
+38. **`textarea` 的初值来自它的文本子节点，`input[type=hidden]` 不占布局。**
+    `CollectInline` 里 `textarea` 分支原来不设 `widget_value`，`<textarea>正文</textarea>`
+    渲染成空框；隐藏域则被当成普通控件排版，一个 CSRF token 就撑出 74×28 的空白。
+    勾选类控件（`checkbox`/`radio`）也一样：不能落进"白底+边框+文字"那条通用输入框
+    分支，否则会把 `value="1"` 当文字画在框里。
 
 ---
 

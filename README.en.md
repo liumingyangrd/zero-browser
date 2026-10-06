@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.4-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.5-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -30,8 +30,11 @@ double-click select-all) and the clipboard (`Ctrl+C/X/V`, `Shift+Insert`, contex
 inside the self-drawn shell.
 CSS supports tag / class / id / descendant / `>` / comma groups / `*` /
 **attribute selectors** / **structural pseudo-classes**; layout supports block flow, inline text
-wrapping (including per-character wrapping for CJK), flex row and column, **CSS Grid**,
+wrapping (including per-character wrapping for CJK), flex row and column (including the default
+`align-items: stretch`), **CSS Grid**, **`float` / `clear` columns**,
 **`position: relative / absolute / fixed` with `z-index`**, table rows, lists and `<pre>`.
+Font sizes follow the CSS rules for `px` / `%` / `em` / `rem` (the `rem` base tracks `html`'s
+`font-size`).
 
 ### Images and background images (WIC decodes bytes to pixels)
 
@@ -164,23 +167,49 @@ stable `z-index` order, and hit testing shares exactly the same coordinate trans
 
 `input` (`text` / `password` / `submit` / `button` / `reset`), `button`, `select` and `textarea`
 are painted with a control-like appearance, showing `value` / `placeholder` / `option` text, with
-a focus highlight.
+a focus highlight. `input[type="hidden"]` takes no layout space, as in a real browser, so the
+CSRF hidden fields that every login page carries no longer push the page around.
 
 ![Form controls](docs/screenshots/forms.png)
 
-> Rendering only: typing into a field and submitting a form are not implemented yet
-> (see [Not implemented yet](#not-implemented-yet)).
+**Interaction** (self-drawn, no system `EDIT` control):
+
+- Clicking a control gives it the keyboard focus; page focus and the address bar are exclusive,
+  and `Esc` drops the focus.
+- Typing, `Backspace` / `Delete` and `←` / `→` / `Home` / `End` edit the text by **code point**.
+- `Tab` / `Shift+Tab` walk the focusable controls in DOM order and wrap around.
+- `Enter` (or a click on `input[type=submit]` / `<button>`) submits the owning `<form>`:
+  `GET` builds a query string, `POST` sends a request body
+  (`application/x-www-form-urlencoded`). Fields are encoded in **document order**, hidden
+  fields are included, the activated submit button is appended last, and unchecked
+  `checkbox` / `radio` controls are skipped. `<button type="button">` does not submit.
+
+> `select` shows the current option only — there is **no drop-down list** yet — and a click
+> inside a control still just puts the caret at the end of the text (use `Home` / `End` /
+> the arrow keys to move it).
 
 ### Real-world pages
 
 After reworking resource loading (parallel fetch + session reuse), CSS parsing (`@media` nested
 blocks) and length parsing (`max-content` / `calc()` / `vh` …, which used to collapse to `0` and
-made whole pages zero-width), the browser can open real websites and show their content:
+made whole pages zero-width), plus **`float` columns** and **`rem`/`em` font sizes**, the browser
+can open real websites:
 
 | Page type | Result |
 | --- | --- |
-| A large video-sharing site | Top navigation, channel categories, and video card titles / uploader names / dates are all readable |
-| A competitive-programming judge site | The "script sets a cookie then reloads" anti-bot challenge is detected and completed first, after which the banner, countdown and problem-list entries render |
+| A large video-sharing site | Top navigation, a four-column channel grid, and video titles / uploader names / dates are all readable |
+| A competitive-programming judge site | The "script sets a cookie then reloads" anti-bot challenge is detected and completed first, after which the banner, countdown, problem-jump box and the two-column contest / announcement sections render |
+
+> **That judge site ships two UIs, and it matters which one you see.** Its HTML contains both an
+> empty `<div id="app"></div>` and a `<div id="app-old">` holding the old server-rendered markup
+> (an Amaze UI grid). What a mainstream browser shows is the **new UI that Vue 3 renders into
+> `#app`** — that needs a working 235 KB webpack bundle, which this project's self-built ES5 subset
+> interpreter cannot run (no `Promise`, no modules, no regex literals). So this browser shows the
+> **old `#app-old` markup**. That is a JavaScript capability boundary, not a layout bug.
+>
+> That old markup now lays out **correctly**: the framework's `.am-u-md-*` grid columns are laid
+> out with `float: left`, and before `float` existed every column degenerated into a stacked block
+> flow, squeezing the whole page into one narrow strip.
 
 > Both were fetched from the live network, not local mock-ups. The layout is still rougher than a
 > mainstream browser, for the reasons listed under [Not implemented yet](#not-implemented-yet):
@@ -212,24 +241,43 @@ In one sentence: **the system turns bytes into pixels and sound; everything else
 
 ## Build
 
-Requires 32-bit MinGW g++ (developed with `D:\Dev-Cpp\MinGW32`, g++ 10.2).
+Requires a MinGW that ships `g++` (the development machine uses the one bundled with
+Embarcadero Dev-Cpp at `C:\Program Files (x86)\Embarcadero\Dev-Cpp\TDM-GCC-64`, TDM-GCC 9.2).
+`build.bat` prefers the `g++` on `PATH` and otherwise adds a few known install locations.
 
 ```bat
 cd zero-browser
 build.bat
 ```
 
-Output: `build\zero-browser.exe`
+One run produces **both architectures**:
+
+```
+build\zero-browser.exe       32-bit (x86, PE32)   ~3.8 MB
+build\zero-browser-x64.exe   64-bit (x64, PE32+)  ~4.5 MB
+```
 
 The script links **statically** (`-static -static-libgcc -static-libstdc++`), producing a single
-dependency-free executable (~2.7 MB) that needs no extra runtime beyond system DLLs:
+dependency-free executable (size varies with the toolchain) that needs no extra runtime beyond
+system DLLs:
 
 ```
 GDI32 / USER32 / KERNEL32 / msvcrt / ole32 / MSIMG32 / WINHTTP / MFPlat / MFReadWrite
 ```
 
-Libraries (already in `build.bat`): `gdi32 winhttp mfplat mfreadwrite mfuuid ole32 uuid mmdevapi
-strmiids ksuser avrt windowscodecs msimg32`.
+Libraries (already in `build.bat`): `gdi32 winhttp mfplat mfuuid ole32 uuid strmiids ksuser
+avrt windowscodecs msimg32`, plus an import library for `mfreadwrite`.
+
+> Three toolchain differences worth knowing:
+> - **The `mfreadwrite` import library is not always installed with MinGW.** This project uses
+>   exactly one export from it, `MFCreateSourceReaderFromByteStream`, so `build.bat` probes with
+>   `g++ --print-file-name=libmfreadwrite.a`; TDM-GCC's multilib ships the header but not the
+>   `.a`, so it falls back to the same-named import library from the Windows SDK
+>   (`Windows Kits\10\Lib\<version>\um\<arch>\`).
+> - `-D_WIN32_WINNT=0x0601`: older MinGW headers default lower, and `GetTickCount64` is then
+>   not declared at all.
+> - Stale `zero-browser*.exe` processes are killed before linking; while one is alive the link
+>   fails with `cannot open output file ...: Permission denied`.
 
 > `src\media.cpp` and `src\audio_out.cpp` must be compiled **separately**: MinGW's `ksmedia.h`
 > and MF's strmif headers both define `TIMECODE_SAMPLE` / `DDPIXELFORMAT`. See
@@ -258,6 +306,13 @@ Local test pages:
 python -m http.server 8765 --directory testpage
 ```
 
+Form submission needs to show what the server actually received, so there is a separate probe
+server (same `testpage/` static root, plus a `GET`/`POST /echo` endpoint):
+
+```bat
+python tools\form_server.py 8902
+```
+
 ---
 
 ## If the app will not start
@@ -269,8 +324,8 @@ the executable could not be loaded, not that the browser crashed. Check, in orde
 1. **Is the file complete?** In the folder that holds it, verify with PowerShell (size and SHA256
    are on the [Releases](https://github.com/liumingyangrd/zero-browser/releases) page):
    ```powershell
-   $f = ".\zero-browser-v0.1.4-win32.exe"
-   (Get-Item $f).Length                                          # expect 3515113
+   $f = ".\zero-browser-v0.1.5-win32.exe"
+   (Get-Item $f).Length                                          # expect 3996442
    (Get-FileHash $f -Algorithm SHA256).Hash
    [BitConverter]::ToString([IO.File]::ReadAllBytes($f)[0..1])   # expect 4D-5A ("MZ")
    ```
@@ -280,8 +335,9 @@ the executable could not be loaded, not that the browser crashed. Check, in orde
 2. **Was the file blocked?** Right-click it → Properties → tick "Unblock" if present, and copy it
    out of a cloud-synced or network folder (OneDrive, a mapped drive, a zip preview) into a plain
    local folder such as `C:\zb\` before running it.
-3. **Is the machine ARM-based?** This is a 32-bit x86 (`PE32 / i386`) executable; on Windows on
-   ARM it needs the x86 emulation layer. If that is unavailable or disabled by policy, Windows
+3. **Is the machine ARM-based?** The 32-bit package is `PE32 / i386` and the 64-bit package is
+   `PE32+ / AMD64`; on Windows on ARM the 32-bit package needs the x86 emulation layer. If that is
+   unavailable or disabled by policy, Windows
    reports exactly this message. Check Settings → System → About → System type.
 
 ## Diagnostics and evidence
@@ -306,10 +362,44 @@ build\zero-browser.exe --shot --url http://127.0.0.1:8765/video2.html ^
     --out build\a.bmp --out2 build\b.bmp ^
     --click 512,330 --click 678,493 --wait 1200 --after 600
 
-:: Images / background images / grid / forms
+:: --click / --type-field TEXT / --press NAME are queued and executed in the order given on
+:: the command line, so a multi-step flow such as "click a field, type, click the next one,
+:: press Enter" is expressible. --press accepts tab / shift+tab / enter / escape / backspace /
+:: delete / left / right / home / end. Note that --type targets the address bar only; use
+:: --type-field to drive page controls.
+
+:: Images / background images / grid / forms / float columns
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/images.html   --out build\img.bmp --wait 1500 --size 1100x1900
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/grid.html     --out build\grid.bmp --wait 1200 --size 1100x1000 --dump-boxes
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/forms.html    --out build\forms.bmp --wait 1200 --size 900x760 --dump-boxes
+::   float column regression (expect content_height=619; without float every column stacks and
+::   the number grows noticeably)
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/floats.html   --out build\floats.bmp --wait 1200 --size 1100x1200 --dump-boxes
+
+:: Form interaction regression. Start the form probe server first:
+python tools\form_server.py 8902
+::   Typing into a control + Tab traversal (each [form] press should report, in turn,
+::   input(text) -> input(password) -> textarea -> select -> button -> input(submit))
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/forms.html ^
+    --out build\ft.bmp --wait 1500 --size 900x760 ^
+    --click 311,240 --type-field "-OK" --press tab --press tab --press shift+tab
+::   Enter submits the POST form (the echo page should show
+::   method=POST and body=csrf=tok-42&user=zero-user-X&pass=secret123&remember=1)
+build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
+    --out build\fp.bmp --wait 1500 --size 900x900 --dump-boxes ^
+    --click 311,203 --type-field "-X" --press enter
+::   Clicking the submit button (the body should end with &do=login -- a pressed button is
+::   submitted only when it carries a name)
+build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
+    --out build\fb.bmp --wait 1500 --size 900x900 --dump-boxes ^
+    --click 311,203 --type-field "-X" --click 208,319
+::   GET form (expect query=q=%E8%87%AA%E7%A0%94%E5%86%85%E6%A0%B8-Y&go=%E6%90%9C%E7%B4%A2)
+build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
+    --out build\fg.bmp --wait 1500 --size 900x900 --dump-boxes ^
+    --click 311,499 --type-field "-Y" --click 512,499
+::   <button type="button"> must not submit (no [form] click-submit in the output)
+build\zero-browser.exe --shot --url http://127.0.0.1:8902/formsubmit.html ^
+    --out build\fc.bmp --wait 1500 --size 900x900 --dump-boxes --click 286,319
 
 :: Network diagnostics (the URL follows --net-test directly; the third argument is optional
 :: and writes the body to a file)
@@ -464,6 +554,13 @@ python tools\echo_headers.py 8901
 - Forms: `input` / `select` / `textarea` / `button` render with correct sizes and values, and the
   `input[type="text"]` attribute selector matches only text fields (the submit button keeps its
   intrinsic width)
+- Form submission end to end (`tools/form_server.py` + `testpage/formsubmit.html`; `--shot
+  --dump-boxes` reads the server's echo page): pressing Enter submits the `POST` form and yields
+  `body=csrf=tok-42&user=zero-user-X&pass=secret123&remember=1` (**document order**, hidden field
+  included, no un-pressed button), clicking the submit button makes it `...&do=login`, the `GET`
+  form yields `query=q=%E8%87%AA%E7%A0%94%E5%86%85%E6%A0%B8-Y&go=%E6%90%9C%E7%B4%A2`, and
+  `<button type="button">` does not submit; `Tab` walks
+  `input(text) → input(password) → textarea → select → button → input(submit)`
 - Cookies: `--cookie-test` prints `echo_body=Cookie: auth=abc123; pref=dark` with `jar_size=2`
 - Network: with `ZB_PROXY=http://127.0.0.1:7890` set, `http://example.com` is fetched successfully
 - **JavaScript** (measured windowless with `--shot`; both the script output and the layout come from
@@ -488,13 +585,13 @@ python tools\echo_headers.py 8901
     cases** (infinite loop, infinite recursion, syntax error, `null` property, calling a
     non-function, `catch` recovery, …)
   - adding JS did not disturb the page regressions: index 577 / images 1861 / grid 467 / forms 469 /
-    flexblocks 233 / video2 864 / position 1200
+    flexblocks 233 / video2 864 / position 1200 / floats 619
 - **Structure comparison against another browser** (same local page, same window width, comparing
   row/column content bands with `tools/compare_render.py`): the first content band aligns exactly
   (relative y 22–40 vs 22–40) and later bands differ by about 6px. Before the font-size fix each
   line was 10–12px taller (root cause: `font-size` was converted as points, see pitfall 23)
 - Local regression (`--shot` measured `content_height`): images 1861 / grid 467 / position 1200 /
-  forms 469 / flexblocks 233 / video2 864 / index 577
+  forms 469 / flexblocks 233 / video2 864 / index 577 / floats 619
 
 > If `https://` fails with `Win32 error 12185` (`ERROR_WINHTTP_CANNOT_CONNECT`), the environment is
 > usually blocking TLS/CONNECT — it is not a bug in the browser code. On a normal Windows install
@@ -577,6 +674,13 @@ python tools\echo_headers.py 8901
 - **Inline content and block children are interleaved in document order** (inline runs form
   anonymous block boxes, matching browser behaviour)
 - Flex row/column, `margin: auto` centring, table rows, list markers, whitespace preserved in `<pre>`
+- The flex default `align-items: stretch`: the built-in home page's four cards end up equal height
+  with their links aligned (before the fix each card took its own content height)
+- `float` columns: the judge site's Amaze UI grid (`.am-g` + `.am-u-md-8` / `.am-u-md-4`) sits side
+  by side correctly; before the fix every column degenerated into a stacked block flow and the page
+  squeezed into one narrow strip
+- Font sizes: `1.4rem` / `.875em` / `80%` resolve by the CSS rules; before the fix the judge site's
+  announcement column collapsed to 1–2 px and 613 character runs piled onto a single `y`
 - CSS Grid: `px` / `%` / `fr` / `auto` / `repeat()` / `minmax()`, `grid-column: span N`, `gap`
 - `position: relative` / `absolute` / `fixed` with `z-index` layering
 - Inline images and form controls take part in line height and align to the text baseline
@@ -618,9 +722,15 @@ python tools\echo_headers.py 8901
   that lazy-load them)
 - Downscaling uses HALFTONE for smooth thumbnails; upscaling uses COLORONCOLOR to keep edges crisp
 
-**Forms (rendering only)**
-- `input` (`text`/`password`/`submit`/`button`/`reset`), `button`, `select`, `textarea`
+**Forms (rendering + interaction)**
+- `input` (`text`/`password`/`submit`/`button`/`reset`/`checkbox`/`hidden`), `button`, `select`,
+  `textarea`
 - Shows `value` / `placeholder` / first `option` text, with focus highlight and intrinsic sizing
+- `input[type="hidden"]` takes no layout space (CSRF hidden fields no longer skew the page)
+- Click to focus, code-point text editing, `Tab`/`Shift+Tab` focus traversal
+- `Enter`, or a click on the submit button, submits the `<form>`: `GET` query string / `POST`
+  request body, fields encoded in document order, hidden fields included, the pressed submit
+  button appended last
 
 ---
 
@@ -645,10 +755,19 @@ python tools\echo_headers.py 8901
   recognised and emulated, which is how that judge site can be opened at all) are both still
   there — having JS does not remove them
 - **Streaming**: HLS / DASH / m3u8 segment fetching is not implemented; only direct media files work
-- **Form interaction**: controls render, but typing, focus traversal and form submission (`Enter`,
-  `form` submission) are not implemented
-- **CSS extras**: `float`, `position: sticky`, `transform`/`transition`/`animation`, `flex-wrap`
-  (parsed but not wrapping yet), pseudo-elements `::before`/`::after`
+- **Form interaction is still incomplete**: typing, focus traversal and `GET`/`POST` submission
+  work, but `select` has **no drop-down list** (it only shows the current option); a click inside
+  a control just puts the caret at the end of the text; `enctype="multipart/form-data"` (file
+  upload), `formnovalidate`, constraint validation and `:invalid` are not supported; and clicking
+  `input[type=checkbox]` does not toggle its checked state
+- **CSS extras**: `position: sticky`, `transform`/`transition`/`animation`, `flex-wrap`
+  (parsed but not wrapping yet), `vertical-align`, pseudo-elements `::before`/`::after`
+- **`float` is a deliberately simplified subset**: floats sit side by side on a line and wrap when
+  they no longer fit, and the container's height includes them (equivalent to the clearfix every
+  grid framework ships). That is enough to drive grid frameworks, but ordinary block flow
+  **avoids** floats instead of being allowed to overlap them as strict CSS permits, and inline
+  text still does not wrap around a floated image. `clear` is parsed but has no separate effect
+  (block flow always avoids floats).
 - **Positioning precision**: `absolute` is currently resolved against the **parent's content box**
   rather than the nearest positioned ancestor
 - **Image extras**: animated GIFs show only the first frame; `<canvas>`, `<svg>`, `srcset` and
@@ -725,9 +844,9 @@ zero-browser/
     media.cpp / .h        Media Foundation player (decode, timeline, seek)
     audio_out.cpp / .h    WASAPI audio output
   docs/screenshots/       README screenshots (PNG)
-  testpage/               local test pages (images, grid, flex, position, forms, video, external CSS, JS)
+  testpage/               local test pages (images, grid, flex, float columns, position, forms, form submit, video, external CSS, JS)
   testmedia/              test clips
-  tools/                  probes and evidence tools (pixel/timeline/header helpers, js_probe.cpp, js_selftest.js)
+  tools/                  probes and evidence tools (pixel/timeline/header helpers, form_server.py, js_probe.cpp, js_selftest.js)
 ```
 
 ---
@@ -903,6 +1022,31 @@ zero-browser/
     5 (access denied), and even PowerShell's own `Set-Clipboard` fails then. The program must report
     this case honestly as **"the operation failed"** rather than crashing or silently writing bad
     data.
+35. **`font-size` must not treat `1.4rem` as "1.4 truncated".** The old code did
+    `(int)std::atof(value)`, so `1.4rem` → `1px`, `1.6rem` → `1px` and `2em` → `2px`: body text
+    collapsed to one or two pixels and hundreds of lines piled up on the same `y` into a black
+    smear. The judge site's framework uses `1.4rem` thirty times, which flattened its announcement
+    column completely. `px` / `%` / `em` / `rem` must be handled by the CSS rules, and the `rem`
+    base has to actually follow `html`'s `font-size` (pages commonly write
+    `html{font-size:62.5%}`). A GNU `?:` extension went away in the same edit — MSVC would not
+    compile it.
+36. **`float` is not an optional feature; it is the foundation of many sites.** The Bootstrap-era
+    and Amaze UI generation of grid frameworks lay out entirely with `float: left` plus percentage
+    widths, and rely on a `:before`/`:after` clearfix so the container contains its floats. Without
+    `float`, columns such as `.am-u-md-8` / `.am-u-md-4` all degenerate into a stacked block flow
+    and the whole page squeezes into one narrow strip — it looks like "the layout collapsed" when
+    exactly one property was missing. Likewise, **inline content after a float** has to step aside
+    first, or it is painted straight on top of the float (two blocks of text on top of each other).
+37. **The default of `align-items` is `stretch`, not "do nothing".** The flex row implementation
+    only handled `center` / `flex-end`, so the default fell through and every card took its own
+    content height. The built-in home page's four cards and the links inside them ended up
+    misaligned — the first thing anyone sees when they open the browser.
+38. **A `textarea`'s initial value comes from its text child, and `input[type=hidden]` occupies no
+    layout.** `CollectInline` never set `widget_value` in its `textarea` branch, so
+    `<textarea>text</textarea>` rendered as an empty box; hidden inputs were laid out like ordinary
+    controls, so a single CSRF token pushed out 74×28 of blank space. Checkbox/radio controls have
+    the same trap: they must not fall into the generic "white box + border + text" input branch, or
+    `value="1"` gets painted inside the box as text.
 
 ---
 

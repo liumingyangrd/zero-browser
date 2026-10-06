@@ -60,6 +60,16 @@ static int RunShotMode(int argc, char** argv) {
             opt.focus_address = true;
         } else if (a == "--type") {
             next(&opt.type_text);
+        } else if (a == "--type-field") {
+            zb::BrowserApp::ShotOptions::Action act;
+            act.kind = zb::BrowserApp::ShotOptions::Action::Kind::TypeField;
+            next(&act.text);
+            opt.actions.push_back(act);
+        } else if (a == "--press") {
+            zb::BrowserApp::ShotOptions::Action act;
+            act.kind = zb::BrowserApp::ShotOptions::Action::Kind::Press;
+            next(&act.text);
+            opt.actions.push_back(act);
         } else if (a == "--backspace") {
             std::string v;
             next(&v);
@@ -86,23 +96,42 @@ static int RunShotMode(int argc, char** argv) {
             int x = 0;
             int y = 0;
             if (std::sscanf(v.c_str(), "%d,%d", &x, &y) == 2) {
-                opt.clicks.push_back({x, y});
+                zb::BrowserApp::ShotOptions::Action act;
+                act.kind = zb::BrowserApp::ShotOptions::Action::Kind::Click;
+                act.x = x;
+                act.y = y;
+                opt.actions.push_back(act);
             }
         }
     }
     if (opt.out.empty()) {
         std::printf(
             "用法: zero-browser.exe --shot --url <地址> --out <bmp> "
-            "[--out2 <bmp>] [--click X,Y]... [--wait ms] [--after ms] "
+            "[--out2 <bmp>] [--click X,Y] [--type-field TEXT] [--press NAME] "
+            "... [--wait ms] [--after ms] "
             "[--size WxH] [--scroll Y] [--set-address TEXT] [--focus-address] "
             "[--type TEXT] [--backspace N] [--clipboard TEXT] [--paste N] "
-            "[--select-all] [--copy]\n");
+            "[--select-all] [--copy] [--cut] [--hotkey NAME] [--dump-boxes]\n"
+            "  --click / --type-field / --press 按命令行给出的顺序依次执行，\n"
+            "  所以「--click 用户名 --type-field 张三 --press enter」是一条链。\n"
+            "  --press 支持 tab / shift+tab / enter / escape / backspace /\n"
+            "  delete / left / right / home / end。\n");
         return 1;
     }
-    std::printf("shot url=%s size=%dx%d wait=%dms clicks=%zu\n", opt.url.c_str(),
-                opt.width, opt.height, opt.wait_ms, opt.clicks.size());
-    for (const auto& c : opt.clicks) {
-        std::printf("  click (%d,%d)\n", c.first, c.second);
+    std::printf("shot url=%s size=%dx%d wait=%dms actions=%zu\n", opt.url.c_str(),
+                opt.width, opt.height, opt.wait_ms, opt.actions.size());
+    for (const auto& act : opt.actions) {
+        switch (act.kind) {
+            case zb::BrowserApp::ShotOptions::Action::Kind::Click:
+                std::printf("  click (%d,%d)\n", act.x, act.y);
+                break;
+            case zb::BrowserApp::ShotOptions::Action::Kind::TypeField:
+                std::printf("  type-field '%s'\n", act.text.c_str());
+                break;
+            case zb::BrowserApp::ShotOptions::Action::Kind::Press:
+                std::printf("  press %s\n", act.text.c_str());
+                break;
+        }
     }
     zb::BrowserApp app(GetModuleHandleA(nullptr));
     bool ok = app.HeadlessShot(opt);

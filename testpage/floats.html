@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>float 分栏测试</title><style>
+body { margin:0; background:#f8fafc; color:#0f172a; font-family:Segoe UI; font-size:14px; }
+.row { width:100%; max-width:900px; margin:0 auto; }
+.col { float:left; box-sizing:border-box; padding:8px; }
+.c8 { width:66.66666667%; }
+.c4 { width:33.33333333%; }
+.c3 { width:25%; }
+.c12 { width:100%; }
+.clear { clear:both; }
+.card { background:#eef2ff; border:1px solid #93c5fd; padding:12px; }
+h2 { font-size:18px; margin:0 0 8px 0; }
+p { margin:0 0 6px 0; }
+</style></head><body>
+
+<!-- 8/12 + 4/12：网格框架最典型的两栏 -->
+<div class="row">
+  <div class="col c8"><div class="card">
+    <h2>主栏 8/12</h2>
+    <p>宽 66.67%，靠 float:left 与右栏并排。</p>
+    <p>不实现 float 时它会独占一整行，右栏被挤到下面。</p>
+  </div></div>
+  <div class="col c4"><div class="card">
+    <h2>右栏 4/12</h2>
+    <p>宽 33.33%。</p>
+  </div></div>
+  <div class="clear"></div>
+</div>
+
+<!-- 四等分：验证一行里放四个、以及放不下时换行 -->
+<div class="row">
+  <div class="col c3"><div class="card"><h2>四分之一 A</h2><p>25%</p></div></div>
+  <div class="col c3"><div class="card"><h2>四分之一 B</h2><p>25%</p></div></div>
+  <div class="col c3"><div class="card"><h2>四分之一 C</h2><p>25%</p></div></div>
+  <div class="col c3"><div class="card"><h2>四分之一 D</h2><p>25%</p></div></div>
+  <div class="clear"></div>
+</div>
+
+<!-- 一整行：放不下时必须换到下一行，而不是并排挤扁 -->
+<div class="row">
+  <div class="col c8"><div class="card"><h2>第三行 · 8/12</h2></div></div>
+  <div class="col c8"><div class="card"><h2>第三行 · 第二个 8/12（应换到下一行）</h2></div></div>
+  <div class="clear"></div>
+</div>
+
+<!-- 浮动后面的普通块流必须避让，不能叠在一起 -->
+<div class="row">
+  <div class="col c4"><div class="card"><h2>左浮动 4/12</h2><p>高度较矮</p></div></div>
+  <div class="col c4"><div class="card"><h2>左浮动 4/12</h2><p>这一列更高一些，用来验证父容器包含浮动</p><p>第二行文字</p><p>第三行文字</p></div></div>
+  <div class="clear"></div>
+  <div class="col c12"><div class="card"><h2>浮动之后的整行块（必须在其下方）</h2></div></div>
+</div>
+
+</body></html>

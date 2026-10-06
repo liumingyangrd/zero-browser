@@ -48,6 +48,10 @@ struct TabState {
     // 正在加载的目标地址。加载期间地址栏与状态栏显示它，而不是等加载完成才更新
     // 的 url —— 否则按下回车后地址栏会立刻弹回上一个页面（实测的 bug）。
     std::string pending_url;
+    // 页面表单焦点：表单输入与地址栏互斥，键盘二选一。
+    Node* field = nullptr;
+    int field_caret = 0;
+    bool field_focused = false;
 };
 
 class BrowserApp {
@@ -70,10 +74,21 @@ public:
         int after_ms = 1500;
         // 可选：导航后先把页面滚动到指定 y（文档坐标），用于验证 fixed 悬浮。
         int scroll = 0;
-        // 可重复的 --click X,Y，按顺序依次投递给真实的 OnLButtonDown。
-        std::vector<std::pair<int, int>> clicks;
+        // --shot 的交互脚本：按命令行给出的顺序依次执行。
+        // 表单回归要的正是「点控件 → 输入 → 回车/点提交」这种有先后的多步动作，
+        // 所以 --click / --type-field / --press 统一进同一个有序列表，而不是
+        // 分成几个各管一段的字段（那样就没法表达"点它、再打字"）。
+        struct Action {
+            enum class Kind { Click, TypeField, Press };
+            Kind kind = Kind::Click;
+            int x = 0;
+            int y = 0;
+            std::string text;  // TypeField 的文本 / Press 的键名
+        };
+        std::vector<Action> actions;
         // 地址栏输入测试：--set-address 设置内容，--focus-address 聚焦，
         // --type 逐字符走真实的 OnChar 路径（用于回归「输入即崩溃」这类问题）。
+        // 注意 --type 只服务地址栏：它会强制把焦点交给地址栏，测不了页面控件。
         std::string set_address;
         bool focus_address = false;
         std::string type_text;
@@ -162,6 +177,24 @@ private:
     void OnNavigationDone(LPARAM l);
     // 第二阶段：图片与外链脚本取完后的回执（渐进渲染，见 StartNavigate）。
     void OnAssetsDone(LPARAM l);
+    // ---- 页面表单交互（登录这类流程的地基）
+    // 取/写控件文本：input 用 value 属性，textarea 用文本子节点，select 用当前选项。
+    std::string FieldText(const Node* n) const;
+    void SetFieldText(Node* n, const std::string& v);
+    // 点击时把焦点给控件（nullptr 表示取消焦点）
+    void FocusField(Node* n, int click_x);
+    // 提交控件所在的 <form>：GET 拼查询串，POST 走请求体。
+    // activated 是"被点/被回车激活的提交按钮"（没有就传 nullptr），
+    // 它的 name=value 按 HTML 规范要一并带上（只有名字非空时）。
+    bool SubmitFieldForm(Node* n, Node* activated = nullptr);
+    // Tab / Shift+Tab：按 DOM 顺序在可编辑控件之间移动焦点，返回是否移动了。
+    bool AdvanceFieldFocus(bool backward);
+    // 诊断输出：把当前页面表单焦点的状态打成一行（--shot 回归靠它取证）。
+    void LogFieldState(const char* tag) const;
+    // 提交用的待发请求体（NavigateTo 之前设置，StartNavigate 取用后清空）
+    std::string post_pending_body_;
+    std::string post_pending_type_;
+
     std::string CurrentUrl() const;
     // 界面显示用的地址：有正在加载的目标就显示它，否则显示当前页面地址。
     std::string DisplayUrl() const;

@@ -289,7 +289,7 @@ avrt windowscodecs msimg32`, plus an import library for `mfreadwrite`.
 
 > `src\media.cpp` and `src\audio_out.cpp` must be compiled **separately**: MinGW's `ksmedia.h`
 > and MF's strmif headers both define `TIMECODE_SAMPLE` / `DDPIXELFORMAT`. See
-> [Pitfalls](#pitfalls-read-before-changing-anything).
+> [Pitfalls I hit](#pitfalls-i-hit).
 
 ---
 
@@ -928,233 +928,240 @@ zero-browser/
 
 ---
 
-## Pitfalls (read before changing anything)
+## Pitfalls I hit
 
-1. **The canvas bit depth must be explicit.** `GdiCanvas` used `CreateCompatibleBitmap(dc_, ...)`,
-   whose depth follows the DC passed in. With a DC from `CreateCompatibleDC(nullptr)` (a 1x1
-   monochrome bitmap selected by default) you get a **1bpp bitmap** and everything is dithered to
-   black and white. It now always creates a 32-bit DIB section.
-2. **The coordinate transform must be exactly invertible.** The convention is
-   `screen = viewport origin + document - scroll`. The painter once used `doc - viewport + scroll`
-   (missing the origin, inverted scroll) and ended up `2 * viewport.y` off from hit testing, which
-   cropped the top of the page and made the video control bar and links unclickable. Always check
+Every one of these is something I ran into myself while building this. I wrote them down so I do
+not have to run into them twice. If you are about to touch rendering, layout, networking or the
+JS interpreter, it is worth a skim first.
+
+1. **The canvas bit depth has to be explicit.** I first built the canvas with
+   `CreateCompatibleBitmap(dc_, ...)`, whose depth follows the DC you hand it. Mine came from
+   `CreateCompatibleDC(nullptr)`, which has a 1×1 monochrome bitmap selected by default — so I got a
+   **1bpp monochrome bitmap** and every colour page and video frame was dithered to black and white.
+   I switched to a 32-bit DIB section everywhere.
+2. **The coordinate systems have to be exact inverses.** My convention is
+   "screen = viewport origin + document − scroll". The rendering side said
+   `doc - viewport + scroll` instead: no viewport origin, and the scroll sign was flipped, so it
+   differed from hit testing by `2 * viewport.y`. The top of the page was cut off and the video
+   controls and links could not be clicked. My rule now: if you touch the coordinate system, check
    `PaintBox` and `OnLButtonDown` together.
-3. **`Length` defaults to `is_auto = true`, which is only right for width/height.** `margin` and
-   `padding` must be explicitly zeroed (use `ZeroLength()`), otherwise every block's horizontal
-   margins are treated as `auto` and all fixed-width elements get centred.
-4. **Never use `std::atomic<double>` to pass playback position or seek requests.** With 32-bit
-   MinGW at `-O2` cross-thread writes were observed to be invisible (seeking had no effect, the
-   position stopped updating) while the same code was fine at `-O0`. The playback clock is now a
-   plain `double` guarded by a mutex; boolean flags still use `std::atomic<bool>`.
+3. **`Length` defaulting to `is_auto = true` only suits width/height.** `margin` and `padding` have
+   to be zeroed explicitly (with `ZeroLength()`). I forgot, so every block's left and right margins
+   were treated as `auto` and every fixed-width element was centred by mistake.
+4. **`std::atomic<double>` did not carry the playback position on 32-bit MinGW with `-O2`.** I used
+   it for the playback clock and seek requests and hit cross-thread writes that were simply not
+   visible (dragging the progress bar did nothing, the position did not update after a seek), while
+   the same `-O0` build was fine. The clock is now a plain `double` behind a mutex; boolean flags
+   still use `std::atomic<bool>`.
 5. **`media.cpp` and `audio_out.cpp` must be compiled separately.** MinGW's `ksmedia.h` and MF's
-   strmif headers both define `TIMECODE_SAMPLE` / `DDPIXELFORMAT`. The WASAPI GUIDs are defined
-   locally inside `audio_out.cpp` — do not delete them.
-6. **`Page` has `unique_ptr` members and a declared destructor**, so the explicit `Page(Page&&)` /
-   `operator=` must stay, otherwise `vector<TabState>` will not compile.
-7. **`windows.h` must be included before `gfx.h`**, otherwise `DrawText` is affected by the
-   `DrawTextA/W` macros and the compiler reports "marked override but does not override".
-8. **Whitespace-only text nodes must not create empty lines.** Newlines/indentation between block
-   elements in HTML are separate Text nodes; feeding them straight into `TokenizeText` treats
-   `\n` as a hard break and emits a row of empty line boxes that push later blocks down (up to
-   ~100px per nesting level). `TokenizeText` now only emits a hard break when the node already
-   contained a real word, and whitespace-only nodes take no height. Use `--dump-boxes` to read
-   live box coordinates — old coordinates become invalid after layout fixes.
-9. **Indentation text inside block containers must be handled while collecting inline content.**
-   For `.boxed>\n  <img>`, even without a hard break `pending_space` emits a `" "` run after the
-   image piece. The rule is: **whitespace between inline elements collapses to one space,
-   whitespace at block boundaries is dropped, and trailing whitespace is always dropped.**
-10. **Background `cover` / `contain` must be clipped to the box.** `background-size: cover` scales
-    the image larger than the box and centres it, so `oy` can be negative; without
-    `canvas->Clip(box)` the image bleeds into neighbouring content. Clip before drawing and
-    `ResetClip` afterwards.
-11. **`WinHttpQueryHeaders` misses multiple `Set-Cookie` headers with this MinGW header.** MinGW's
-    `winhttp.h` declares the last parameter as `LPDWORD` (the Windows SDK uses `DWORD`), and
-    index-based enumeration returns only the first header. Instead, fetch the whole raw response
-    header with `WINHTTP_QUERY_RAW_HEADERS_CRLF` and parse every `set-cookie:` line — only then are
-    all cookies captured reliably.
-12. **WIC's `InitializeFromMemory` takes `BYTE*`.** Passing `const uint8_t*` fails to compile;
-    `const_cast<BYTE*>(data)` is required. WIC only reads those bytes, so the cast is safe.
-13. **A block container must interleave inline content and block children in document order.**
-    The early implementation laid out all inline content first and all block children afterwards,
-    which in a `label`/`input` form pushed **every input to the top of the container** while the
-    labels stayed below. Consecutive inline content now forms an anonymous block box that
-    interleaves with block children in document order.
-14. **Moving a box during positioning must move its inline runs too.** `ApplyPositioning` used to
-    update `rect` / `content` only, leaving the text and images at their layout-time coordinates,
-    so a `fixed` floating box appeared empty. The whole subtree is now shifted by the `content`
-    origin delta (`ShiftBoxSubtree`).
-15. **Trailing whitespace after a wide replaced element must be dropped.** Otherwise the space does
-    not fit, wraps to a new line, and inherits the line height stretched by the image — adding a
-    full image height (a 918×561 image added 561px). The rule lives in `LayoutInlineInto`:
-    "a space that does not fit is skipped with `continue`".
-16. **Attribute selectors must not be skipped.** Selector parsing used to skip `[...]`, so
-    `input[type="text"] { width:320px }` behaved like `input { width:320px }` and stretched the
-    submit button to 320px. `[attr]` and all comparison operators are now parsed, and state
-    pseudo-classes (`:hover` / `:focus`) are made to never match.
-17. **`grid-template-columns` separates tracks with spaces, not commas.** Only `repeat()` /
-    `minmax()` arguments use commas; splitting on commas turns `120px 1fr` into a single track
-    (one column, every item full width).
-18. **Media Foundation's RGB32 is really BGRX, and the X byte is not guaranteed to be 255.**
-    Measured: the whole frame had alpha 0. Because this engine composites with **premultiplied
-    AlphaBlend**, alpha 0 makes the frame fully transparent — the symptom is a permanently black
-    `<video>` while the player state, `has_frame` and frame size all look perfectly normal. The
-    alpha byte is now forced to 255 when copying a frame. `tools/frame_probe.cpp` exists to expose
-    exactly this (it prints the alpha histogram and top/middle/bottom row samples).
-19. **Metrics such as "non-black pixels in the video area" must exclude the control bar.** The
-    control bar alone contributes tens of thousands of non-black pixels, so a fully black picture
-    still looks like "there is content". `page_media_probe` now only counts the picture area (box
-    height minus the 34px control bar).
-20. **When adding a `display:grid` branch, do not overwrite the `display:flex` branch.**
-    `LayoutBox` dispatches by `display` to `LayoutFlexRow` / `LayoutColumn` / `LayoutGrid` /
-    `LayoutBlockFlow`. Inserting the grid branch once replaced the whole flex branch, and every
-    flex container (including the card row on the built-in home page) degraded to stacked blocks.
-    `testpage/flexblocks.html` is the regression page that guards this.
-21. **Never use PowerShell `Get-Content` / `Set-Content` to bulk-edit UTF-8 source files.**
-    Windows PowerShell 5.1 decodes BOM-less files using the system ANSI code page: non-ASCII
-    comments turn into mojibake, and worse, "the third byte of a character followed by ASCII
-    (<0x40)" is consumed as an invalid double-byte pair — so newlines, `<`, `/` and `"` bytes
-    vanish, comments swallow the next line of code, string literals lose their closing quote, and
-    the compiler reports a pile of unrelated errors. Use an editor or a patch tool, or explicit
-    `[System.IO.File]::ReadAllText` (UTF-8) plus `WriteAllBytes`. If it already happened, the
-    damage is reversible: decode as the ANSI code page and write back as UTF-8 to remove the
-    mojibake, then restore the few dropped bytes (they always look like "<first two bytes of a
-    character> + `?`") from context.
-22. **The real hazard in UTF-8 helpers is `size_t` underflow, not encoding.** The old code was:
+   strmif headers both define `TIMECODE_SAMPLE` / `DDPIXELFORMAT`. I keep a local copy of the WASAPI
+   GUIDs inside `audio_out.cpp` — do not delete it.
+6. **`Page` has a `unique_ptr` member and a declared destructor, so the move operations have to be
+   written out.** Without `Page(Page&&)` / `operator=`, `vector<TabState>` does not compile.
+7. **`windows.h` must come before `gfx.h`.** Otherwise `DrawText` is affected by the
+   `DrawTextA/W` macros and you get "marked override but does not override".
+8. **Whitespace-only text nodes must not produce blank lines.** The newlines and indentation
+   between block elements in HTML are separate Text nodes, and I fed them straight into
+   `TokenizeText`, where `\n` counts as a hard break — so a row of empty line boxes appeared and
+   pushed every following block down (one level of indentation was worth nearly 100px). Now
+   `TokenizeText` only emits a hard break when the node already contains a real word, and
+   whitespace-only nodes take no height. Related: `--dump-boxes` reports live box coordinates, so
+   old coordinates go stale the moment the layout changes.
+9. **Those indentation text nodes also have to be handled when collecting inline content.** With
+   something like `.boxed>\n  <img>`, even when `TokenizeText` emits no hard break,
+   `pending_space` still produces a `" "` run after the image piece. The rule I settled on:
+   **keep one space between inline elements, drop whitespace at block boundaries, and always drop
+   trailing whitespace.**
+10. **`background-size: cover` / `contain` has to be clipped to the box.** `cover` scales the image
+    larger than the box and centres it, so `oy` can go negative; I called `DrawImage` directly and
+    the oversized image spilled into neighbouring areas. Now the background is clipped with
+    `canvas->Clip(box)` first and `ResetClip` afterwards.
+11. **Enumerating multiple `Set-Cookie` headers with `WinHttpQueryHeaders` loses them under the
+    local MinGW headers.** In MinGW's `winhttp.h` that function's last parameter is `LPDWORD`
+    (the Windows SDK has `DWORD`), and polling by index only returned the first header. I now
+    request `WINHTTP_QUERY_RAW_HEADERS_CRLF` once, take the whole header block and parse every
+    `set-cookie:` line myself, which is the only way I got all the cookies reliably.
+12. **WIC's `InitializeFromMemory` wants a `BYTE*`.** Passing a `const uint8_t*` does not compile;
+    it needs `const_cast<BYTE*>(data)`. WIC only reads those bytes, so the cast is safe.
+13. **A block container has to interleave inline content and block children in document order.** My
+    early version laid out "all inline content first, then all block children", so in a form that
+    alternates `label` and `input`, **every input piled up at the top of the container** with the
+    labels left below. Now consecutive inline content forms one anonymous block box that interleaves
+    with block children in document order.
+14. **When positioning moves a box, the runs inside it have to move too.** `ApplyPositioning` only
+    changed `rect` / `content` at first, so the text and images inside kept their layout-time
+    absolute coordinates and the text of a `fixed` overlay stayed where it was — it looked like an
+    empty box. Now the whole subtree is shifted by the `content` origin delta (`ShiftBoxSubtree`).
+15. **Trailing spaces after a wide replaced element have to be dropped.** Otherwise a space that
+    does not fit starts a new line and inherits the line height the image inflated, adding a full
+    image height for nothing (561px after a 918×561 image). The "skip the space that does not fit"
+    branch in `LayoutInlineInto` is that rule.
+16. **Attribute selectors cannot be ignored.** My early selector parser skipped `[...]` entirely, so
+    `input[type="text"] { width:320px }` was treated as `input { width:320px }` and stretched the
+    submit button to 320 wide too. It now parses `[attr]` and every comparison operator, and
+    state pseudo-classes (`:hover` / `:focus`) are treated as not matching.
+17. **`grid-template-columns` separates tracks with spaces, not commas.** Only the arguments of
+    `repeat()` / `minmax()` use commas. I split on commas once, so `120px 1fr` became a single
+    track — which shows up as one column with every item stacked full width.
+18. **Media Foundation's RGB32 is really BGRX, and the X byte is not guaranteed to be 255.** I
+    measured an entire frame with alpha 0, and this engine composites with **premultiplied
+    AlphaBlend** — alpha 0 means the whole frame is fully transparent, so `<video>` stayed pure
+    black while the player state, `has_frame` and the frame size all looked "fine". Frames now get
+    alpha forced to 255 on copy. `tools/frame_probe.cpp` is what I wrote to see through this at a
+    glance (it prints the alpha histogram and top/middle/bottom row samples).
+19. **A "non-black pixel count" for a video area has to exclude the control bar.** The control bar
+    alone has tens of thousands of non-black pixels, so a fully black picture still reported "has
+    content" and I nearly concluded playback was fine. `page_media_probe` now only counts the
+    picture area (the video box height minus the 34px control bar).
+20. **When adding a `display:grid` branch, do not knock out the `display:flex` one.** Dispatch on
+    `display` goes to `LayoutFlexRow` / `LayoutColumn` / `LayoutGrid` / `LayoutBlockFlow`, all at
+    the top of `LayoutBox`. I once replaced the whole flex branch while inserting grid, and every
+    flex container (including the built-in home page's card row) degenerated into a stacked block
+    flow. `testpage/flexblocks.html` is the regression page I keep for exactly this.
+21. **Do not batch-edit UTF-8 sources with PowerShell's `Get-Content` / `Set-Content`.** I did this
+    once and paid for it: Windows PowerShell 5.1 decodes BOM-less files as the system ANSI code page
+    (GBK here), so Chinese comments turned to mojibake first — and worse, a "third byte of a Han
+    character + following ASCII(<0x40)" pair is treated as an illegal GBK double byte and **swallowed
+    whole**, so newlines and the bytes for `<`, `/` and `"` simply vanished. Comments swallowed the
+    next line of code, string literals lost their quotes, and the compiler produced a pile of
+    nonsense errors. Use an editor or a patch tool for bulk edits, or read and write explicitly with
+    `[System.IO.File]::ReadAllText` (UTF-8) plus `WriteAllBytes`. If it already happened, do not
+    panic: this corruption is reversible — decode the file as GBK and write it back as UTF-8 to
+    remove the mojibake, then repair the few remaining dropped bytes (they look like "first two
+    bytes of a Han character followed by `?`") from context.
+22. **The easy trap in UTF-8 helpers is a `size_t` underflow, not the encoding itself.** This is
+    what I wrote at first:
     ```cpp
-    if (i > s.size()) i = s.size();   // with an empty string, i is clamped to 0
+    if (i > s.size()) i = s.size();   // clamp puts i at 0 for an empty string
     size_t j = i - 1;                 // 0 - 1 underflows to SIZE_MAX
-    while (j > 0 && ((unsigned char)s[j] & 0xC0) == 0x80) j--;   // s[SIZE_MAX] read
+    while (j > 0 && ((unsigned char)s[j] & 0xC0) == 0x80) j--;   // reads s[SIZE_MAX]
     ```
-    That helper runs on **every keystroke** (to snap the caret to a code-point boundary), so
-    "typing into an empty address bar crashes" — it walked backwards from `data() - 1` until it hit
-    unmapped memory. Fix: guard the empty string and `i == 0` first, and split boundary snapping
-    into its own function (`Utf8SnapToBoundary`) instead of reusing `Utf8PrevIndex`. The same fix
-    also removed an off-by-one where a character was inserted *before* the last character.
-    Regression: `--set-address "\empty" --focus-address --type "http://a.cn"` must print
-    `hex=68 74 74 70 ...` and not crash.
-23. **CSS `font-size` is in pixels, not points.** `CreateFontW`'s height parameter is the character
-    (em) height; the early code used `-MulDiv(font_size, dpi, 72)`, turning 16px into a 21px em at
-    96 DPI, so **all text was about 30% larger than a mainstream browser** and line heights were
-    inflated (visible as 10–12px extra per line in the structure comparison). The correct form is
-    `-MulDiv(font_size, dpi, 96)`, i.e. `-font_size` at standard DPI.
-24. **`MFCreateTempFile` returns `E_ACCESSDENIED` (0x80070005) in a restricted environment.**
-    The symptom was network video failing to play with only the message "cannot create media cache
-    file" — which is why error messages must carry the `HRESULT`. The fix is to fall back to
-    writing a cache file with `CreateFileW` and opening it with `MFCreateFile`, deleting it in the
-    player's `Close()` (measured: zero files left in the temp directory before and after).
-    Note that MinGW's `mfplat` import library has **no** `MFCreateMFByteStreamOnStream` symbol, so
-    the in-memory-stream approach fails to link (`undefined reference to ...@8`).
-25. **While the address bar is focused, every global shortcut is swallowed inside `OnKey`.**
-    The code used to begin with `if (address_focused_) { ...editing keys...; return; }`, so as
-    long as the caret sat in the address bar, `F5` / `Ctrl+R` / `Ctrl+L` all did nothing (neither
-    reload nor focus). The correct order is **handle the global shortcuts first, then enter the
-    editing branch**. For the same reason `F5` must not clobber what is being typed: `NavigateTo`
-    drops focus and syncs the URL on purpose, so the text has to be saved and restored around the
-    reload.
-26. **Clipboard text must have its line breaks removed before it is inserted into the address
-    bar.** Copied text often carries a trailing `\r\n`, and pasting it straight into a URL hands
-    `WinHttpOpen` an address containing a newline (navigation fails, or the request line gets
-    corrupted). Reading the clipboard must also drop C0/C1 control characters and U+2028/2029;
-    on top of that the `CF_TEXT` fallback has to convert via `CP_ACP`, and its buffer must be
-    **`n` `wchar_t`s** — allocating `n-1` for the string while the API writes `n` (including the
-    terminating `\0`) overflows by one `wchar_t`.
-27. **After a successful `SetClipboardData` the memory belongs to the system.** Calling
-    `GlobalFree` on it as well is a double free; only on failure does this process free it. Also,
-    `CF_TEXT` is only the fallback — prefer `CF_UNICODETEXT`, otherwise Chinese text makes a
-    round trip through the ANSI code page.
+    That function runs on **every keystroke** (snapping the caret to a code point boundary), which
+    is why "typing into an empty address bar crashed": it walked backwards from `data()-1` until it
+    hit unmapped memory. The fix is to reject the empty string and `i == 0` up front, and to split
+    "snap to a boundary" into its own function (`Utf8SnapToBoundary`) instead of reusing
+    `Utf8PrevIndex` for it; that also fixed characters being inserted before the last one. The
+    regression for it: `--set-address "\empty" --focus-address --type "http://a.cn"` must print
+    `hex=68 74 74 70 ...` and must not crash.
+23. **CSS `font-size` is in pixels, not points.** `CreateFontW`'s height parameter is a character
+    height (em), and I wrote `-MulDiv(font_size, dpi, 72)` at first — at 96 DPI a 16px font became
+    a 21px em, so **all text was 30% larger than Chromium** and line heights were uniformly too big
+    (comparing against Edge, every line was 10–12px taller). The right form is
+    `-MulDiv(font_size, dpi, 96)`, which is just `-font_size` at standard DPI.
+24. **`MFCreateTempFile` returns `E_ACCESSDENIED` (0x80070005) in a restricted environment.** The
+    symptom was network video failing to play with nothing but "could not create the media temp
+    file" — which is why the error text now carries the `HRESULT`. The fix is to write the cache
+    file myself with `CreateFileW` and open it with `MFCreateFile` when the first call fails, then
+    delete it in the player's `Close()` (measured: zero files in the temp directory before and
+    after a run). Also note that MinGW's `mfplat` import library does **not** export
+    `MFCreateMFByteStreamOnStream` — my in-memory-stream attempt failed to link
+    (`undefined reference to ...@8`).
+25. **Focusing the address bar swallowed every global shortcut in `OnKey`.** I had
+    `if (address_focused_) { ...edit keys...; return; }` at the very top, so as soon as the caret
+    was in the address bar, `F5` / `Ctrl+R` / `Ctrl+L` all did nothing. The correct order is
+    **global shortcuts first, edit branch second**. Same area: an `F5` reload must not wipe what the
+    user is typing in the address bar, and since `NavigateTo` deliberately blurs and re-syncs the
+    URL, the reload path has to save and restore the text around it.
+26. **Clipboard text has to lose its line breaks before it goes into the address bar.** Copied text
+    often carries a trailing `\r\n`, and pasting it verbatim into a URL makes `WinHttpOpen` receive
+    an address with a newline in it (navigation fails, or the request line is corrupted). I now drop
+    C0/C1 control characters and U+2028/2029 as well; the `CF_TEXT` fallback converts via `CP_ACP`,
+    and its **buffer must be `n` `wchar_t`s** — allocating `n-1` while the API writes `n` (including
+    the terminating `\0`) overflows by one `wchar_t`.
+27. **Once `SetClipboardData` succeeds, the memory belongs to the system.** I called `GlobalFree`
+    after a successful call, which is a double free; only the failure path frees it in this process.
+    Also `CF_TEXT` is only a fallback — prefer `CF_UNICODETEXT`, or Chinese text takes a detour
+    through the ANSI code page.
 28. **A window class without `CS_DBLCLKS` never receives `WM_LBUTTONDBLCLK`.** Double-click
-    select-all needs it; likewise, a self-drawn edit box is not an `EDIT` control, so
-    `WM_PASTE` / `WM_COPY` / `WM_CUT` must be handled by hand (IME and accessibility tools send
-    only these three messages).
-29. **Command-line arguments are not UTF-8.** `main(int, char**)` receives ANSI code-page bytes,
-    so a regression using an argument such as `--clipboard "中文"` is converted to GBK first and
-    then interpreted as UTF-8, producing mojibake. In a windowless `--shot` session `GetKeyState`
-    is always 0 as well, so `--hotkey` / `--paste` must take the modifier keys as **explicit
-    arguments** — otherwise the branch under test is not the one a user triggers.
-30. **If `Env` (the scope chain) is a value type, closures capture a snapshot instead of a live
-    binding.** The early implementation copied the scope environment by value, so `total` in
+    select-all needs it. Likewise, my self-drawn edit box is not an `EDIT` control, so
+    `WM_PASTE` / `WM_COPY` / `WM_CUT` have to be handled by hand — IMEs and accessibility tools send
+    only those three messages.
+29. **Command-line arguments are not UTF-8.** `main(int, char**)` receives ANSI code page bytes, so
+    when I use `--clipboard "中文"` in a regression the argument is first converted to GBK and then
+    interpreted as UTF-8 — mojibake. And in a `--shot` windowless session `GetKeyState` is always 0,
+    so `--hotkey` / `--paste` have to take the modifier keys **as explicit arguments**; otherwise
+    what is being tested is not the branch a real user triggers.
+30. **If the scope chain is a value type, closures capture a snapshot.** My early implementation
+    copied the scope environment by value, so `total` in
     `var total=0; arr.forEach(function(x){ total += x; })` stayed 0 forever, and assignments to an
     outer variable inside a `for` body did not count either. The fix is to hold the variable table
-    in a `shared_ptr` and expose it as a reference member: copying an `Env` **yields another handle
-    onto the same scope**, so a binding written through one is visible to every closure.
-31. **In an interactive interpreter, "throwing an error also costs steps" causes infinite
-    recursion.** Once the step limit is hit, throwing an error object that carries `toString` runs
-    the error formatting through `CallFunction` → `JsCall` → `BumpSteps`, which exceeds the limit
-    again, formats again, and recurses forever as
-    `CallFunction` → `ToPrimitive` → `ToString` → `CallFunction` (measured: the stack blows and the
-    process crashes). Fix: after the limit is exceeded **throw a plain string value only**, and
-    format error text with a **JS-free** safe formatter (read the `name` / `message` properties
-    directly — see `ErrorText`).
-32. **`<!doctype html>` used to be rendered as body text.** The parser only recognised uppercase
-    `<!DOCTYPE`, while real pages almost always write it in lowercase, so every page grew an extra
-    line of text at the top. Fix: skip every declaration region starting with `<!` (including
-    `<!-- -->` and `<![CDATA[]]>`) as a whole, **case-insensitively**; also strip the **UTF-8 BOM**
-    (Notepad's "save as UTF-8" writes one by default, and without stripping it `<!doctype` is pushed
-    into the body as well).
-33. **Self-drawn controls are `TextRun`s, not `Box`es, so hit testing that only walks the box tree
-    can never hit a button.** `NodeAt` must check the runs inside a box as well and return the DOM
-    node attached to the run as the more precise hit (`TextRun` gained a `node` field for this);
-    otherwise neither `--click` nor a real click is ever dispatched to a `<button>`.
-34. **The clipboard may be held by another process.** When `OpenClipboard` fails, `GetLastError` is
-    5 (access denied), and even PowerShell's own `Set-Clipboard` fails then. The program must report
-    this case honestly as **"the operation failed"** rather than crashing or silently writing bad
-    data.
-35. **`font-size` must not treat `1.4rem` as "1.4 truncated".** The old code did
+    in a `shared_ptr` and expose it as a reference member: copying an `Env` **hands out another
+    handle to the same scope**, so every closure sees the bindings written into it.
+31. **In an interpreter, "throwing an error also costs steps" can recurse you to death.** Once the
+    step budget is exhausted, throwing an error object that has a `toString` makes error formatting
+    go through `CallFunction` → `JsCall` → `BumpSteps`, which exceeds the budget again, which
+    formats again — an infinite `CallFunction` → `ToPrimitive` → `ToString` → `CallFunction` chain
+    that in my measurement blew the stack and killed the process. The fix: past the budget, throw
+    **plain string values only**, and format error text with something that never calls back into JS
+    (read the `name` / `message` properties directly, see `ErrorText`).
+32. **I shipped a build that rendered `<!doctype html>` as body text.** The parser only recognised
+    uppercase `<!DOCTYPE` while real pages almost always write it lowercase, so every page grew an
+    extra line of text at the top. The fix: skip every `<!`-introduced declaration region (including
+    `<!-- -->` and `<![CDATA[]]>`) wholesale and **case-insensitively**, and strip the **UTF-8 BOM**
+    too (Notepad's "save as UTF-8" adds one by default, and without stripping it the `<!doctype`
+    shows up as body text as well).
+33. **A self-drawn control is a `TextRun`, not a `Box`, so walking only the box tree never hits a
+    button.** I had `NodeAt` looking at boxes alone, so neither `--click` nor a real click ever
+    reached a `<button>`. `NodeAt` now checks the runs inside a box as well and returns the run's DOM
+    node as the more precise hit (which is why `TextRun` gained a `node` field).
+34. **The clipboard can be held by another process.** When `OpenClipboard` fails, `GetLastError` is
+    5 (access denied), and at that point even PowerShell's own `Set-Clipboard` fails. The right
+    behaviour is to report **"the operation failed"** honestly — do not crash, and do not silently
+    write bad data.
+35. **`font-size` must not treat `1.4rem` as "1.4 truncated".** What I wrote was
     `(int)std::atof(value)`, so `1.4rem` → `1px`, `1.6rem` → `1px` and `2em` → `2px`: body text
-    collapsed to one or two pixels and hundreds of lines piled up on the same `y` into a black
-    smear. The judge site's framework uses `1.4rem` thirty times, which flattened its announcement
-    column completely. `px` / `%` / `em` / `rem` must be handled by the CSS rules, and the `rem`
-    base has to actually follow `html`'s `font-size` (pages commonly write
-    `html{font-size:62.5%}`). A GNU `?:` extension went away in the same edit — MSVC would not
-    compile it.
-36. **`float` is not an optional feature; it is the foundation of many sites.** The Bootstrap-era
+    collapsed to one or two pixels and hundreds of lines piled onto a single `y` into a black smear.
+    The grid framework one judge site uses contains `1.4rem` thirty times and its announcement column
+    was flattened completely. `px` / `%` / `em` / `rem` have to be handled by the CSS rules, and the
+    `rem` base has to actually follow `html`'s `font-size` (pages commonly write
+    `html{font-size:62.5%}`). The same edit removed a GNU `?:` extension that MSVC would not compile.
+36. **`float` is not an optional feature; it is the foundation of a lot of sites.** The Bootstrap-era
     and Amaze UI generation of grid frameworks lay out entirely with `float: left` plus percentage
     widths, and rely on a `:before`/`:after` clearfix so the container contains its floats. Without
-    `float`, columns such as `.am-u-md-8` / `.am-u-md-4` all degenerate into a stacked block flow
-    and the whole page squeezes into one narrow strip — it looks like "the layout collapsed" when
-    exactly one property was missing. Likewise, **inline content after a float** has to step aside
-    first, or it is painted straight on top of the float (two blocks of text on top of each other).
-37. **The default of `align-items` is `stretch`, not "do nothing".** The flex row implementation
-    only handled `center` / `flex-end`, so the default fell through and every card took its own
-    content height. The built-in home page's four cards and the links inside them ended up
-    misaligned — the first thing anyone sees when they open the browser.
+    `float`, columns such as `.am-u-md-8` / `.am-u-md-4` all degenerate into a stacked block flow and
+    the page squeezes into one narrow strip — it looks like "the layout collapsed" when exactly one
+    property was missing. Likewise, **inline content after a float** has to step aside first, or it
+    is painted straight on top of the float, two blocks of text on top of each other.
+37. **The default of `align-items` is `stretch`, not "do nothing".** My flex row only handled
+    `center` / `flex-end`, so the default fell through and every card took its own content height.
+    The built-in home page's four cards and the links inside them ended up misaligned — the first
+    thing anyone sees when they open the browser.
 38. **A `textarea`'s initial value comes from its text child, and `input[type=hidden]` occupies no
-    layout.** `CollectInline` never set `widget_value` in its `textarea` branch, so
+    layout.** My `CollectInline` never set `widget_value` in its `textarea` branch, so
     `<textarea>text</textarea>` rendered as an empty box; hidden inputs were laid out like ordinary
-    controls, so a single CSRF token pushed out 74×28 of blank space. Checkbox/radio controls have
+    controls, so a single CSRF token pushed out 74×28 of blank space. Checkbox and radio controls are
     the same trap: they must not fall into the generic "white box + border + text" input branch, or
     `value="1"` gets painted inside the box as text.
-39. **Switching tabs must not re-lay out the whole page — one click could freeze for two
-    seconds.** The tab branch of `OnLButtonDown` called `RelayoutActive()` unconditionally, for
-    nothing: the viewport had not changed and the page had not been touched. Measured on a page
-    with a document height of 5914 and roughly 10k runs: **1955–1976 ms per switch**, which is the
-    freeze users report; clicking the already-active tab cost the same. The fix is for `TabState`
-    to remember the viewport size the last layout was computed at (`layout_w`/`layout_h`) and for
-    the new `EnsureLayout()` to re-lay out only when that size differs. **No extra dirty flag is
-    needed**: every path that changes page content (navigation finishing, assets arriving, scripts
-    mutating the DOM, form edits) already forces `RelayoutTab` afterwards, which refreshes the
-    record. The same commit removed a second piece of duplicated work: `OnAssetsDone` also
-    re-laid out unconditionally, so one navigation laid the same page out twice back to back; now
-    it only does so when images were really attached or a script dirtied the DOM.
-    Measuring this **cannot use `GetTickCount64`** (about 15.6 ms resolution) — it needs
-    `QueryPerformanceCounter`. The log threshold is tunable through `ZB_PERF_MS` (default 4 ms;
+39. **Switching tabs must not re-lay out the whole page — mine froze for two seconds.** The tab
+    branch of `OnLButtonDown` called `RelayoutActive()` unconditionally, for nothing: the viewport had
+    not changed and the page had not been touched. Measured on a page with a document height of 5914
+    and roughly 10k runs: **1955–1976 ms per switch**, which is the freeze users report; clicking the
+    already-active tab cost the same. The fix is for `TabState` to remember the viewport size the last
+    layout was computed at (`layout_w`/`layout_h`) and for the new `EnsureLayout()` to re-lay out only
+    when that size differs. **No extra dirty flag is needed**: every path that changes page content
+    (navigation finishing, assets arriving, scripts mutating the DOM, form edits) already forces
+    `RelayoutTab` afterwards, which refreshes the record. The same commit removed a second piece of
+    duplicated work: `OnAssetsDone` also re-laid out unconditionally, so one navigation laid the same
+    page out twice back to back; now it only does so when images were really attached or a script
+    dirtied the DOM. Measuring this **cannot use `GetTickCount64`** (about 15.6 ms resolution) — it
+    needs `QueryPerformanceCounter`. The log threshold is tunable through `ZB_PERF_MS` (default 4 ms;
     set it to 0 to see every layout).
-40. **A block-level `<a>` was not clickable at all.** `CollectLinks` only collected runs carrying
-    a link flag, but a `display:block` `<a>` goes through `PopulateBoxes` and becomes a box, whose
-    text is an ordinary run in a child box that never got the flag — so the whole block simply did
-    not exist as far as hit testing was concerned. Real sites write their nav items and list items
-    this way, and so does the settings page (which is how it was noticed: clicking did nothing).
-    The fix appends the block `<a>`'s own `rect` as a link area too, and appends it **after the
-    child boxes**, so an inline link nested inside a block link still wins.
-41. **Built-in pages must accept both the `about:` and the `browser://` spelling.** The home
-    page's "parser details" link has `href="about:parser"`, but `BuiltinHtml` only recognised
-    `parser` / `browser://parser`, so both links had been **silently falling back to the home
-    page** — they were clickable, just going to the wrong place, which is harder to notice than a
-    dead link. The `about:` prefix is now stripped before matching.
+40. **A block-level `<a>` was not clickable at all, and it took me a while to find.** `CollectLinks`
+    only collected runs carrying a link flag, but a `display:block` `<a>` goes through
+    `PopulateBoxes` and becomes a box whose text is an ordinary run in a child box that never got the
+    flag — so the whole block simply did not exist as far as hit testing was concerned. Real sites
+    write their nav items and list items this way, and so does my settings page (which is how it was
+    noticed: clicking did nothing). The fix appends the block `<a>`'s own `rect` as a link area too,
+    and appends it **after the child boxes**, so an inline link nested inside a block link still wins.
+41. **Built-in pages must accept both the `about:` and the `browser://` spelling.** The home page's
+    "parser details" link has `href="about:parser"`, but `BuiltinHtml` only recognised `parser` /
+    `browser://parser`, so both links had been **silently falling back to the home page** — they were
+    clickable, just going to the wrong place, which is harder to notice than a dead link. The
+    `about:` prefix is now stripped before matching.
 42. **Do not make a template placeholder's shape check too narrow.** The built-in pages use
     `{{key}}` placeholders, and to avoid mistaking CSS braces for placeholders I restricted keys to
-    `a-z0-9.` — which made `{{about.barTitle}}` fail the check because of its uppercase `T`, and
-    the token was **printed literally on the page**. Allowing uppercase and underscores is enough.
+    `a-z0-9.` — which made `{{about.barTitle}}` fail the check because of its uppercase `T`, and the
+    token was **printed literally on the page**. Allowing uppercase and underscores is enough.
 
 ---
 

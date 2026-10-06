@@ -264,7 +264,7 @@ avrt windowscodecs msimg32`，外加 `mfreadwrite` 的导入库。
 >   `cannot open output file ...: Permission denied`。
 
 > `src\media.cpp` 与 `src\audio_out.cpp` 必须**分开编译**：MinGW 的 `ksmedia.h` 与 MF 的
-> strmif 头会重复定义 `TIMECODE_SAMPLE` / `DDPIXELFORMAT`，详见[踩过的坑](#踩过的坑改动前请先读)。
+> strmif 头会重复定义 `TIMECODE_SAMPLE` / `DDPIXELFORMAT`，详见[我踩过的坑](#我踩过的坑)。
 
 ---
 
@@ -831,184 +831,178 @@ zero-browser/
 
 ---
 
-## 踩过的坑（改动前请先读）
+## 我踩过的坑
 
-1. **画布位深必须显式指定。** `GdiCanvas` 早期用 `CreateCompatibleBitmap(dc_, ...)`，位深取决于传入的 DC。
-   如果 DC 来自 `CreateCompatibleDC(nullptr)`（默认选中的是 1x1 单色位图），拿到的就是 **1bpp 单色位图**，
-   彩色页面和视频帧会被整体抖动成黑白。现在统一改用 32 位 DIB 段。
-2. **坐标系必须严格互逆。** 约定是 `屏幕坐标 = 视口原点 + 文档坐标 - 滚动量`。
-   渲染端曾写成 `doc - viewport + scroll`（没加视口原点、滚动方向也反了），与命中测试相差 `2 * viewport.y`，
-   结果页面顶部被裁掉、视频控件条与链接都点不中。改坐标系时务必同时检查 `PaintBox` 与 `OnLButtonDown`。
-3. **`Length` 默认 `is_auto = true` 只适合 width/height。** `margin` / `padding` 必须显式置 0
-   （用 `ZeroLength()`），否则每个块的左右 margin 都被当成 `auto`，所有固定宽度元素都会被错误居中。
-4. **不要用 `std::atomic<double>` 传递播放位置/跳转请求。** 在 32 位 MinGW + `-O2` 下实测出现过
-   跨线程写入不可见（进度条跳转不生效、Seek 后位置不更新），同一 `-O0` 构建正常。
-   现在播放时钟改为互斥量保护的普通 `double`。布尔标志仍用 `std::atomic<bool>`。
-5. **`media.cpp` 与 `audio_out.cpp` 必须分开编译。** MinGW 的 `ksmedia.h` 与 MF 的 strmif 头会重复定义
-   `TIMECODE_SAMPLE` / `DDPIXELFORMAT`。WASAPI 的 GUID 在 `audio_out.cpp` 内自带一份定义，不要删。
-6. **`Page` 有 `unique_ptr` 成员且声明了析构**，必须保留显式的 `Page(Page&&)` / `operator=`，否则
-   `vector<TabState>` 无法编译。
-7. **`windows.h` 要在 `gfx.h` 之前包含。** 否则 `DrawText` 会被 `DrawTextA/W` 宏影响，
-   出现 “marked override but does not override”。
-8. **纯空白文本节点不要生成空行。** HTML 源码里块级元素之间的换行/缩进是独立 Text 节点，
-   如果直接 `TokenizeText`，`\n` 会被当成硬换行，产生一排空行盒，把后面的块子元素整体往下推
-   （一个缩进层级最多可推近 100px）。现在 `TokenizeText` 只在“本节点已有实际单词”时才发硬换行，
-   纯空白节点不占高度。`--shot` 里用 `--dump-boxes` 取实时盒坐标，布局修复后旧坐标会失效。
-9. **块容器里的换行缩进文本节点要在收集行内内容时处理掉。** `.boxed>\n  <img>` 这种缩进，
-   即使 `TokenizeText` 不产生硬换行，`pending_space` 也会在图片 piece 之后产出一个 `" "` run。
-   规则是：**行内元素之间的空白保留成一个空格，块级边界处的空白丢弃，末尾空白一律丢弃**。
-10. **背景图 `cover` / `contain` 必须裁剪到盒子内。** `background-size: cover` 把图缩到比
-    盒子更大再居中，`oy` 可能为负；如果不先 `canvas->Clip(box)` 就直接 `DrawImage`，
-    大图会溢出到相邻区域。绘制背景图前先裁剪、绘完 `ResetClip`。
-11. **`WinHttpQueryHeaders` 枚举多个 `Set-Cookie` 在本机 MinGW 头下会漏。** MinGW 的
-    `winhttp.h` 该函数最后一个参数是 `LPDWORD`（Windows SDK 是 `DWORD`），按索引轮询
-    时只拿到第一个头。改用一次 `WINHTTP_QUERY_RAW_HEADERS_CRLF` 取回整段响应头，
-    再自解析所有 `set-cookie:` 行，才能稳定拿到全部 Cookie。
-12. **WIC `InitializeFromMemory` 参数是 `BYTE*`。** 给 `const uint8_t*` 会编译失败，
-    需要 `const_cast<BYTE*>(data)`。WIC 只读不改这些字节，转换是安全的。
-13. **块容器必须按文档顺序交错排布行内内容与块级子盒。** 早期实现是“先把所有行内内容排一遍，
-    再排所有块级子元素”，结果 `label` / `input` 交替的表单里，**所有输入框都堆到容器顶部**，
-    标签留在下面。现在连续的行内内容构成一个匿名块盒，按文档顺序与块级子元素交错。
-14. **定位阶段移动盒子后必须整体平移盒内 runs。** `ApplyPositioning` 早期只改了 `rect` / `content`，
-    盒内文字/图片仍是布局时的绝对坐标，于是 `fixed` 悬浮块的文字留在原地（看起来是个空框）。
+这些都是我自己在这个项目里一条条踩出来的，记下来免得再踩一遍。动渲染、布局、网络或者 JS
+之前，建议先扫一眼。
+
+1. **画布位深要自己指定。** 我一开始用 `CreateCompatibleBitmap(dc_, ...)` 建画布，位深是跟着传入的 DC 走的。
+   那个 DC 来自 `CreateCompatibleDC(nullptr)`，默认选中的是 1×1 单色位图 —— 于是我拿到一张 **1bpp 单色位图**，
+   彩色页面和视频帧被整体抖成了黑白。后来统一换成 32 位 DIB 段。
+2. **坐标系必须严格互逆。** 我定的约定是「屏幕坐标 = 视口原点 + 文档坐标 − 滚动量」，可渲染端我写成了
+   `doc - viewport + scroll`：既没加视口原点，滚动方向也反了，跟命中测试差了 `2 * viewport.y`。
+   结果是页面顶部被裁掉，视频控件条和链接全点不中。后来我给自己立了条规矩：
+   动坐标系就同时检查 `PaintBox` 和 `OnLButtonDown`。
+3. **`Length` 默认 `is_auto = true` 只对 width/height 合适。** `margin` / `padding` 必须显式置 0
+   （用 `ZeroLength()`）。我漏了这一步，于是每个块的左右 margin 都被当成 `auto`，
+   所有固定宽度的元素全被错误居中。
+4. **`std::atomic<double>` 在 32 位 MinGW + `-O2` 下传不了播放位置。** 我本来用它传播放位置和跳转请求，
+   实测出现过跨线程写入不可见（拖进度条不生效、Seek 完位置不更新），同一个 `-O0` 构建却是好的。
+   最后把播放时钟改成互斥量保护的普通 `double`，布尔标志继续用 `std::atomic<bool>`。
+5. **`media.cpp` 与 `audio_out.cpp` 得分开编译。** MinGW 的 `ksmedia.h` 和 MF 的 strmif 头会重复定义
+   `TIMECODE_SAMPLE` / `DDPIXELFORMAT`。WASAPI 的 GUID 我在 `audio_out.cpp` 里自带了一份定义，别删。
+6. **`Page` 有 `unique_ptr` 成员又声明了析构，移动构造就得显式写出来。** 少了 `Page(Page&&)` /
+   `operator=`，`vector<TabState>` 编译不过。
+7. **`windows.h` 要在 `gfx.h` 之前包含。** 不然 `DrawText` 会被 `DrawTextA/W` 宏影响，
+   报 “marked override but does not override”。
+8. **纯空白文本节点不该产生空行。** HTML 里块级元素之间的换行缩进是独立的 Text 节点，我一开始直接丢给
+   `TokenizeText`，`\n` 就被当成硬换行，排版里凭空多出一排空行盒，把后面的块子元素整体往下推
+   （一个缩进层级能推近 100px）。现在 `TokenizeText` 只在本节点已经有实际单词时才发硬换行，
+   纯空白节点不占高度。另外提醒一句：`--dump-boxes` 取的是实时盒坐标，布局一改旧坐标就作废。
+9. **块容器里那些缩进文本节点也得处理掉。** `.boxed>\n  <img>` 这种缩进，就算 `TokenizeText` 不产生硬换行，
+   `pending_space` 还是会在图片 piece 后面吐出一个 `" "` run。我最后定下的规则是：
+   **行内元素之间的空白留一个空格，块级边界处的空白丢掉，末尾空白一律丢掉**。
+10. **背景图 `cover` / `contain` 一定要裁剪到盒子里。** `cover` 会把图放大到比盒子还大再居中，
+    `oy` 可能是负的；我一开始直接 `DrawImage`，大图就溢出到相邻区域去了。
+    现在绘制前先 `canvas->Clip(box)`，画完 `ResetClip`。
+11. **`WinHttpQueryHeaders` 按索引轮询 `Set-Cookie` 在本机 MinGW 头下会漏。** MinGW 的 `winhttp.h` 里
+    这个函数最后一个参数是 `LPDWORD`（Windows SDK 是 `DWORD`），轮询下来只拿到第一个头。
+    我改成一次请求 `WINHTTP_QUERY_RAW_HEADERS_CRLF` 取回整段响应头，再自己解析所有 `set-cookie:` 行，
+    才稳定拿到全部 Cookie。
+12. **WIC `InitializeFromMemory` 要的是 `BYTE*`。** 传 `const uint8_t*` 编译不过，得
+    `const_cast<BYTE*>(data)`。WIC 只读不改这些字节，这个转换是安全的。
+13. **块容器必须按文档顺序交错排布行内内容与块级子盒。** 我早期是「先把所有行内内容排一遍，
+    再排所有块级子元素」，结果 `label` / `input` 交替的表单里，**所有输入框都堆到容器顶部**，
+    标签留在下面。现在连续的行内内容构成一个匿名块盒，按文档顺序和块级子元素交错。
+14. **定位阶段移了盒子，盒内的 runs 也要跟着整体平移。** `ApplyPositioning` 早期只改 `rect` / `content`，
+    盒内文字和图片还是布局时的绝对坐标，于是 `fixed` 悬浮块的文字留在原地，看起来就是个空框。
     现在按 `content` 原点差整体平移整棵子树（`ShiftBoxSubtree`）。
-15. **宽替换元素后面的行尾空格必须丢弃。** 否则空格放不下会另起一行，并继承上一行被图片撑大的
-    行高，凭空多出整整一图高（918×561 的图后面多 561px）。`LayoutInlineInto` 里
-    “放不下的空格直接 `continue`”就是这条规则。
-16. **属性选择器不能忽略。** 早期选择器解析直接跳过 `[...]`，于是 `input[type="text"] { width:320px }`
-    会被当成 `input { width:320px }`，把提交按钮也撑成 320 宽。现在完整解析 `[attr]` 与各类比较运算符，
+15. **宽替换元素后面的行尾空格必须丢掉。** 不然空格放不下会另起一行，还继承上一行被图片撑大的行高，
+    凭空多出整整一图高（918×561 的图后面多出 561px）。`LayoutInlineInto` 里那句
+    「放不下的空格直接 `continue`」就是干这个的。
+16. **属性选择器不能忽略。** 我早期选择器解析直接跳过 `[...]`，于是 `input[type="text"] { width:320px }`
+    被当成 `input { width:320px }`，把提交按钮也撑成 320 宽。现在完整解析 `[attr]` 和各类比较运算符，
     并让状态伪类（`:hover` / `:focus`）判定为不匹配。
 17. **`grid-template-columns` 的 track 分隔符是空格，不是逗号。** 只有 `repeat()` / `minmax()`
-    参数里才是逗号；按逗号拆分会把 `120px 1fr` 当成一个 track（表现为只有一列，子项全宽堆叠）。
-18. **Media Foundation 的 RGB32 实际是 BGRX，X 字节不保证是 255。** 实测整帧 alpha 全是 0，
-    而本引擎用**预乘 AlphaBlend** 合成，alpha=0 会让整帧完全透明——表现就是 `<video>` 一直是纯黑，
-    但播放器状态、`has_frame`、帧尺寸全都“正常”。拷贝帧时统一把 alpha 补成 255。
-    `tools/frame_probe.cpp` 就是用来一眼看穿这件事的（打印 alpha 分布与顶/中/底行采样）。
-19. **“视频区域非黑像素数”这类指标必须排除控件条。** 控件条本身就有上万个非黑像素，
-    画面全黑时也会显示“有内容”，让人误判成播放正常。`page_media_probe` 现在只统计画面区
-    （视频盒高度减掉 34px 控件条）。
-20. **加 `display:grid` 分支时不要把 `display:flex` 分支挤掉。** 本项目按 `display` 分派
-    `LayoutFlexRow` / `LayoutColumn` / `LayoutGrid` / `LayoutBlockFlow`，几个分支都写在
-    `LayoutBox` 开头。曾经在插入 grid 分支时把整段 flex 分支替换掉，结果所有 flex 容器
-    （包括内置主页的卡片行）都退化成竖排块流。`testpage/flexblocks.html` 就是守这条的回归页。
-21. **绝对不要用 PowerShell 的 `Get-Content` / `Set-Content` 批量改 UTF-8 源码。**
-    Windows PowerShell 5.1 默认按系统 ANSI（本机为 GBK）解码无 BOM 文件：中文注释会先变成
-    乱码，更糟的是「汉字第三字节 + 紧跟的 ASCII(<0x40)」会被当成非法 GBK 双字节对**整体吃掉**，
-    于是换行、`<`、`/`、`"` 这些字节凭空消失——注释把下一行代码吞进注释、字符串字面量丢引号，
-    编译报一堆莫名其妙的错。批量替换请用编辑器/补丁工具，或用显式 `[System.IO.File]::ReadAllText`
-    （UTF-8）+ `WriteAllBytes`。若已中招：这类损坏可逆，把文件按 GBK 解码、再按 UTF-8 写回即可
-    去掉乱码，剩余少量丢字节的位置（特征是「汉字前两字节 + `?`」）按上下文补回即可。
-22. **UTF-8 辅助函数里最容易踩的是 `size_t` 下溢，而不是编码本身。**
-    曾经的写法是：
+    的参数里才是逗号。我按逗号拆过，`120px 1fr` 被当成一个 track，表现就是只有一列、子项全宽堆叠。
+18. **Media Foundation 的 RGB32 其实是 BGRX，X 字节不保证是 255。** 我实测整帧 alpha 全是 0，
+    而本引擎用**预乘 AlphaBlend** 合成 —— alpha=0 意味着整帧完全透明：`<video>` 一直是纯黑，
+    可播放器状态、`has_frame`、帧尺寸全都「正常」。现在拷贝帧时统一把 alpha 补成 255。
+    `tools/frame_probe.cpp` 就是我为了一眼看穿这件事写的（打印 alpha 分布和顶/中/底行采样）。
+19. **「视频区域非黑像素数」得排除控件条。** 控件条本身就有上万个非黑像素，画面全黑时也显示「有内容」，
+    我差点误判成播放正常。`page_media_probe` 现在只统计画面区（视频盒高度减掉 34px 控件条）。
+20. **加 `display:grid` 分支时别把 `display:flex` 挤掉。** 我按 `display` 分派
+    `LayoutFlexRow` / `LayoutColumn` / `LayoutGrid` / `LayoutBlockFlow`，几个分支都写在 `LayoutBox` 开头。
+    有一次插 grid 分支时手滑把整段 flex 分支替换掉了，所有 flex 容器（包括内置主页的卡片行）
+    都退化成竖排块流。`testpage/flexblocks.html` 就是我为守住这条留的回归页。
+21. **别用 PowerShell 的 `Get-Content` / `Set-Content` 批量改 UTF-8 源码。** 我这么干过一次，代价惨重：
+    Windows PowerShell 5.1 默认按系统 ANSI（本机为 GBK）解码无 BOM 文件，中文注释先变成乱码，
+    更糟的是「汉字第三字节 + 紧跟的 ASCII(<0x40)」会被当成非法 GBK 双字节对**整体吃掉** ——
+    换行、`<`、`/`、`"` 这些字节凭空消失，注释把下一行代码吞进注释、字符串字面量丢引号，
+    编译报一堆莫名其妙的错。批量替换请用编辑器或补丁工具，或者显式用
+    `[System.IO.File]::ReadAllText`（UTF-8）+ `WriteAllBytes`。已经中招也别慌：这类损坏可逆，
+    把文件按 GBK 解码、再按 UTF-8 写回就能去掉乱码，剩余少量丢字节的位置
+    （特征是「汉字前两字节 + `?`」）按上下文补回即可。
+22. **UTF-8 辅助函数里最容易踩的是 `size_t` 下溢，不是编码本身。** 我当初是这么写的：
     ```cpp
     if (i > s.size()) i = s.size();   // 空串时 i 被钳成 0
     size_t j = i - 1;                 // 0 - 1 下溢成 SIZE_MAX
     while (j > 0 && ((unsigned char)s[j] & 0xC0) == 0x80) j--;   // s[SIZE_MAX] 越界读
     ```
-    这个函数在**每次按键**时都会被调用（把光标吸附到码点边界），于是「地址栏为空时一输入就
-    崩溃」——因为它会从 `data()-1` 一路向前扫，直到踩到未映射内存。修法是先挡空串与 `i == 0`，
+    这个函数在**每次按键**时都会被调用（把光标吸附到码点边界），于是「地址栏为空时一输入就崩溃」
+    —— 它会从 `data()-1` 一路往前扫，直到踩到未映射内存。修法是先挡掉空串与 `i == 0`，
     并把「吸附边界」拆成独立函数（`Utf8SnapToBoundary`），不要再借用 `Utf8PrevIndex` 去实现它；
     顺带还修掉了「字符被插到最后一个字符前面」的错位。回归手段：
     `--set-address "\empty" --focus-address --type "http://a.cn"` 必须输出 `hex=68 74 74 70 ...` 且不崩溃。
-23. **CSS 的 `font-size` 是像素，不是点。** `CreateFontW` 的高度参数是“字符高度（em）”，
-    早期写成 `-MulDiv(font_size, dpi, 72)`，在 96 DPI 下 16px 被放大成 21px 的 em，
-    于是**所有文字比 Chromium 大 30%**、行高整体偏大（对标 Edge 时表现为每行高 10–12px）。
+23. **CSS 的 `font-size` 是像素，不是点。** `CreateFontW` 的高度参数是「字符高度（em）」，
+    我早期写成 `-MulDiv(font_size, dpi, 72)`，96 DPI 下 16px 被放大成 21px 的 em ——
+    **所有文字比 Chromium 大 30%**，行高整体偏大（拿 Edge 对标时表现为每行高 10–12px）。
     正确写法是 `-MulDiv(font_size, dpi, 96)`，标准 DPI 下就是 `-font_size`。
-24. **受限环境里 `MFCreateTempFile` 会返回 `E_ACCESSDENIED`（0x80070005）。**
-    现象是网络视频播放失败、错误只有一句“无法创建媒体临时文件”——所以错误信息一定要带
-    `HRESULT`。修法是失败时自己用 `CreateFileW` 写缓存文件再 `MFCreateFile` 打开，
-    并在播放器 `Close()` 时删除（实测运行前后临时目录文件数都是 0）。
-    注意 MinGW 的 `mfplat` 导入库里**没有** `MFCreateMFByteStreamOnStream` 这个符号，
-    想用内存流方案会链接失败（`undefined reference to ...@8`）。
-25. **地址栏聚焦时，`OnKey` 里所有全局快捷键都会被吞掉。** 原来的写法是
-    `if (address_focused_) { ...处理编辑键...; return; }` 放在最前面，于是只要光标在
-    地址栏里，`F5` / `Ctrl+R` / `Ctrl+L` 全部无效（既不重载也不聚焦）。
-    正确顺序是**先处理全局快捷键、再进编辑分支**。同理，`F5` 重载不能把地址栏里
-    正在输入的内容冲掉：`NavigateTo` 会主动失焦并同步 URL，所以重载前要先存后还原。
-26. **剪贴板文本必须先去换行再插入地址栏。** 复制来的文本常带尾随 `\r\n`，
-    直接拼进 URL 会让 `WinHttpOpen` 拿到带换行的地址（导航失败，或请求行被污染）。
-    读剪贴板时要一并丢掉 C0/C1 控制字符与 U+2028/2029；另外 `CF_TEXT` 回退分支
-    要按 `CP_ACP` 转换，且**缓冲必须开 `n` 个 `wchar_t`**——字符串开 `n-1` 再让 API
-    写 `n` 个（含结尾 `\0`）会越界一个 `wchar_t`。
-27. **写剪贴板时 `SetClipboardData` 成功后内存归系统所有。** 成功还去 `GlobalFree`
-    就是双重释放；只有失败时才由本进程释放。另外 `CF_TEXT` 只是回退项，
-    优先用 `CF_UNICODETEXT`，否则中文会按 ANSI 代码页走一圈。
-28. **窗口类不加 `CS_DBLCLKS` 就收不到 `WM_LBUTTONDBLCLK`。** 双击全选需要它；
-    同理，自绘编辑框不是 `EDIT` 控件，`WM_PASTE` / `WM_COPY` / `WM_CUT`
-    必须自己接（输入法、无障碍工具只发这三条消息）。
-29. **命令行参数不是 UTF-8。** `main(int, char**)` 拿到的是 ANSI 代码页字节，
-    用 `--clipboard "中文"` 这类参数做回归会先被转成 GBK，然后被当成 UTF-8 解释而乱码。
-    `--shot` 的无窗口会话里 `GetKeyState` 也恒为 0，所以 `--hotkey` / `--paste`
+24. **受限环境里 `MFCreateTempFile` 会返回 `E_ACCESSDENIED`（0x80070005）。** 现象是网络视频播放失败，
+    错误只有一句「无法创建媒体临时文件」—— 所以我给错误信息补上了 `HRESULT`。修法是失败时自己用
+    `CreateFileW` 写个缓存文件再 `MFCreateFile` 打开，并在播放器 `Close()` 时删掉
+    （实测运行前后临时目录文件数都是 0）。另外 MinGW 的 `mfplat` 导入库里**没有**
+    `MFCreateMFByteStreamOnStream`，我想走内存流方案时链接直接失败（`undefined reference to ...@8`）。
+25. **地址栏一聚焦，`OnKey` 里的全局快捷键全被吞掉。** 我原来把
+    `if (address_focused_) { ...处理编辑键...; return; }` 放在最前面，于是只要光标在地址栏里，
+    `F5` / `Ctrl+R` / `Ctrl+L` 全部无效。正确顺序是**先处理全局快捷键、再进编辑分支**。
+    同理，`F5` 重载不能把地址栏里正在输入的内容冲掉：`NavigateTo` 会主动失焦并同步 URL，
+    所以重载前要先存后还原。
+26. **剪贴板文本要先去掉换行再插进地址栏。** 复制来的文本常带尾随 `\r\n`，直接拼进 URL 会让
+    `WinHttpOpen` 拿到带换行的地址（导航失败，或者请求行被污染）。读剪贴板时我一并把 C0/C1
+    控制字符和 U+2028/2029 丢掉；另外 `CF_TEXT` 回退分支要按 `CP_ACP` 转换，且
+    **缓冲必须开 `n` 个 `wchar_t`** —— 开 `n-1` 却让 API 写 `n` 个（含结尾 `\0`）会越界一个 `wchar_t`。
+27. **写剪贴板成功后内存归系统所有。** `SetClipboardData` 返回成功之后我再去 `GlobalFree`，
+    那就是双重释放；只有失败时才由本进程释放。另外 `CF_TEXT` 只是回退项，要优先 `CF_UNICODETEXT`，
+    否则中文会按 ANSI 代码页走一圈。
+28. **窗口类不加 `CS_DBLCLKS` 就收不到 `WM_LBUTTONDBLCLK`。** 双击全选需要它。同理，
+    我那个自绘编辑框不是 `EDIT` 控件，`WM_PASTE` / `WM_COPY` / `WM_CUT` 必须自己接
+    —— 输入法和无障碍工具只发这三条消息。
+29. **命令行参数不是 UTF-8。** `main(int, char**)` 拿到的是 ANSI 代码页字节。我拿
+    `--clipboard "中文"` 做回归时，参数先被转成 GBK，再被当成 UTF-8 解释，结果就是乱码。
+    另外 `--shot` 的无窗口会话里 `GetKeyState` 恒为 0，所以 `--hotkey` / `--paste`
     必须把修饰键**显式传参**，否则测的根本不是用户按下的那条分支。
-30. **`Env`（作用域链）如果是值语义，闭包捕获的就是快照而不是活绑定。**
-    早期实现里作用域环境按值拷贝，于是 `var total=0; arr.forEach(function(x){ total += x; })`
-    里的 `total` 永远是 0，`for` 循环体里对外层变量的赋值也不算数。
-    修法是让变量表用 `shared_ptr` 持有并对外暴露成引用成员：拷贝一个 `Env`
-    **等于同一作用域的另一个句柄**，写进去的绑定所有闭包都看得见。
-31. **交互式解释器里"抛错本身也要花步数"会造成无限递归。**
-    步数超限后如果继续抛"带 `toString` 的错误对象"，错误格式化会走
-    `CallFunction` → `JsCall` → `BumpSteps`，于是再次超限、再次格式化，形成
-    `CallFunction` → `ToPrimitive` → `ToString` → `CallFunction` 的无限递归
-    （实测直接爆栈，进程崩溃）。修法：超限后**只抛纯字符串值**，
-    并且错误文本用**不回调 JS** 的安全格式化（直接读 `name` / `message` 属性，见 `ErrorText`）。
-32. **`<!doctype html>` 曾被当成正文渲染出来。** 解析器原来只认大写 `<!DOCTYPE`，
-    而真实页面普遍写小写，于是每个页面顶部多出一行文字。
-    修法：对所有 `<!` 开头的声明区（含 `<!-- -->` 与 `<![CDATA[]]>`）都整体跳过，
-    **大小写不敏感**；同时剥掉 **UTF-8 BOM**（记事本"另存为 UTF-8"默认带 BOM，
+30. **作用域链用值语义，闭包捕获的就是快照。** 我早期让作用域环境按值拷贝，于是
+    `var total=0; arr.forEach(function(x){ total += x; })` 里的 `total` 永远是 0，
+    `for` 循环体里对外层变量的赋值也不算数。修法是让变量表用 `shared_ptr` 持有、对外暴露成引用成员：
+    拷贝一个 `Env` **等于拿到同一作用域的另一个句柄**，写进去的绑定所有闭包都看得见。
+31. **解释器里「抛错本身也要花步数」，会把自己递归死。** 步数超限之后如果继续抛「带 `toString`
+    的错误对象」，错误格式化会走 `CallFunction` → `JsCall` → `BumpSteps`，于是再次超限、再次格式化，
+    形成 `CallFunction` → `ToPrimitive` → `ToString` → `CallFunction` 的无限递归 —— 实测直接爆栈崩进程。
+    修法：超限后**只抛纯字符串值**，并且错误文本用**不回调 JS** 的安全格式化
+    （直接读 `name` / `message` 属性，见 `ErrorText`）。
+32. **`<!doctype html>` 被我当成正文渲染过。** 解析器原来只认大写 `<!DOCTYPE`，而真实页面普遍写小写，
+    于是每个页面顶部都多出一行文字。修法：所有 `<!` 开头的声明区（含 `<!-- -->` 和 `<![CDATA[]]>`）
+    整体跳过、**大小写不敏感**；同时剥掉 **UTF-8 BOM**（记事本「另存为 UTF-8」默认带 BOM，
     不剥也会把 `<!doctype` 顶成正文）。
-33. **自绘控件是 `TextRun` 而不是 `Box`，命中测试只走盒树就永远点不中按钮。**
-    `NodeAt` 必须同时检查盒内的 run，并把 run 关联的 DOM 节点作为更精确的命中结果返回
-    （本次给 `TextRun` 加了 `node` 字段）；否则 `--click` 与真实点击都派发不到 `<button>` 上。
-34. **剪贴板可能被别的进程占用。** `OpenClipboard` 失败时 `GetLastError` 是 5（拒绝访问），
-    此时连 PowerShell 自己的 `Set-Clipboard` 也会失败。程序必须把这种情况当
-    **"操作失败"如实报告**，而不是崩溃或静默写坏数据。
-35. **`font-size` 不能把 `1.4rem` 当成"1.4 取整"。** 原来的实现是
-    `(int)std::atof(value)`，于是 `1.4rem` → `1px`、`1.6rem` → `1px`、`2em` → `2px`：
-    整站正文塌成一两个像素、几百行文字在同一个 y 上叠成一团黑。
-    某评测站用的那套网格框架里 `1.4rem` 出现 30 次，公告栏直接糊掉。必须按 CSS 规则区分
-    `px` / `%` / `em` / `rem`，而且 `rem` 的基准要真的跟随 `html` 的 `font-size`
-    （页面常写 `html{font-size:62.5%}`）。顺手去掉了一个 GNU 扩展 `?:`——
-    MSVC 编译不过。
-36. **`float` 不是"可选特性"，是很多站点的地基。** Bootstrap 时代与 Amaze UI
-    这一代网格框架全靠 `float: left` + 百分比宽度分栏，再用 `:before/:after`
-    的 clearfix 让父容器包含浮动。缺了 `float`，`.am-u-md-8` / `.am-u-md-4`
-    这类列会全部退化成竖排块流，整页挤成一条窄栏 —— 看起来像"排版崩了"，
-    实际只差这一个属性。同理，浮动之后的**行内内容**也要先让位，
-    否则会直接画在浮动上面（两段文字叠在一起）。
-37. **`align-items` 的默认值是 `stretch`，不是"什么都不做"。** flex 行只实现了
-    `center` / `flex-end`，默认值没走任何分支，于是卡片高度各随内容。
-    内置主页那四张卡片和卡片里的链接会因此错开一截，是打开浏览器第一眼就看得到的差异。
-38. **`textarea` 的初值来自它的文本子节点，`input[type=hidden]` 不占布局。**
-    `CollectInline` 里 `textarea` 分支原来不设 `widget_value`，`<textarea>正文</textarea>`
-    渲染成空框；隐藏域则被当成普通控件排版，一个 CSRF token 就撑出 74×28 的空白。
-    勾选类控件（`checkbox`/`radio`）也一样：不能落进"白底+边框+文字"那条通用输入框
-    分支，否则会把 `value="1"` 当文字画在框里。
-39. **切标签不该重排整页 —— 一次点击能冻住两秒。** `OnLButtonDown` 的标签分支原来
-    无条件调用 `RelayoutActive()`，视口没变、页面也没改，纯属白干。实测切到文档高
-    5914、约 1 万个 run 的页面：**单次 1955~1976ms**，用户感觉就是"卡一下"；
-    连点当前已激活的标签也一样卡。修法是 `TabState` 记住上次布局用的视口尺寸
-    （`layout_w`/`layout_h`），新增 `EnsureLayout()` 只在尺寸变了才重排。
-    **不需要额外的"脏"标记**：所有会改页面内容的路径（导航完成、资源到齐、
-    脚本改 DOM、表单输入）本来就在改完之后强制走 `RelayoutTab`，而它会刷新这个记录。
-    同一处还有第二份白干的活：`OnAssetsDone` 也无条件重排，于是导航一次要把同一页
-    连排两遍；现在只有"真的挂上了图片"或"脚本改脏了 DOM"才重排。
-    量这种开销**不能用 `GetTickCount64`**（分辨率约 15.6ms），得上
-    `QueryPerformanceCounter`；日志阈值可用 `ZB_PERF_MS` 调（默认 4ms，
-    排查时设 0 能看到每一次重排）。
-40. **块级 `<a>` 整块点不动。** `CollectLinks` 只收集**带 link 标记的 run**，
-    而 `display:block` 的 `<a>` 会走 `PopulateBoxes` 变成一个盒子，它的文字是子盒里的
-    普通 run、从来没带过 link —— 于是整块链接在命中测试里根本不存在。
-    真实站点的导航项、列表项大量这么写，设置页的语言选项也是这么写的
-    （点了没反应才发现）。修法是在 `CollectLinks` 里把块级 `<a>` 自己的 `rect`
-    也追加成一个链接区域，并且**追加在子盒之后**，这样块里若嵌了行内链接，
+33. **自绘控件是 `TextRun` 不是 `Box`，命中测试只走盒树就永远点不中按钮。** 我原来只让 `NodeAt` 看盒树，
+    结果 `--click` 和真实点击都派发不到 `<button>` 上。现在 `NodeAt` 同时检查盒内的 run，
+    并把 run 关联的 DOM 节点作为更精确的命中结果返回（为此给 `TextRun` 加了 `node` 字段）。
+34. **剪贴板可能被别的进程占着。** `OpenClipboard` 失败时 `GetLastError` 是 5（拒绝访问），
+    这时候连 PowerShell 自己的 `Set-Clipboard` 也会失败。程序该做的就是**如实报告「操作失败」**，
+    别崩溃，也别静默写坏数据。
+35. **`font-size` 不能把 `1.4rem` 当成「1.4 取整」。** 我原来的写法是 `(int)std::atof(value)`，
+    于是 `1.4rem` → `1px`、`1.6rem` → `1px`、`2em` → `2px`：整站正文塌成一两个像素，
+    几百行文字在同一个 y 上叠成一团黑。某评测站用的那套网格框架里 `1.4rem` 出现了 30 次，
+    公告栏直接糊掉。得按 CSS 规则区分 `px` / `%` / `em` / `rem`，而且 `rem` 的基准要真的跟随
+    `html` 的 `font-size`（页面常写 `html{font-size:62.5%}`）。顺手还去掉了一个 GNU 扩展 `?:`
+    —— MSVC 编译不过。
+36. **`float` 不是「可选特性」，是很多站点的地基。** Bootstrap 时代和 Amaze UI 这一代网格框架
+    全靠 `float: left` + 百分比宽度分栏，再用 `:before/:after` 的 clearfix 让父容器包含浮动。
+    缺了 `float`，`.am-u-md-8` / `.am-u-md-4` 这类列会全部退化成竖排块流，整页挤成一条窄栏
+    —— 看起来像「排版崩了」，其实只差这一个属性。同理，浮动之后的**行内内容**也要先让位，
+    否则会直接画在浮动上面，两段文字叠在一起。
+37. **`align-items` 的默认值是 `stretch`，不是「什么都不做」。** 我的 flex 行只实现了
+    `center` / `flex-end`，默认值没走任何分支，于是卡片高度各随内容。内置主页那四张卡片
+    和卡片里的链接因此错开一截 —— 这是打开浏览器第一眼就看得到的差异。
+38. **`textarea` 的初值来自它的文本子节点；`input[type=hidden]` 不占布局。** `CollectInline` 的
+    `textarea` 分支我一开始没设 `widget_value`，`<textarea>正文</textarea>` 就渲染成空框；
+    隐藏域则被当成普通控件排版，一个 CSRF token 能撑出 74×28 的空白。勾选类控件
+    （`checkbox`/`radio`）是同一个坑：别让它们落进「白底 + 边框 + 文字」那条通用输入框分支，
+    否则会把 `value="1"` 当文字画在框里。
+39. **切标签不该重排整页 —— 我这一下能冻住两秒。** `OnLButtonDown` 的标签分支原来无条件调用
+    `RelayoutActive()`，视口没变、页面也没改，纯属白干。实测切到文档高 5914、约 1 万个 run 的页面：
+    **单次 1955~1976ms**，用户感觉就是「卡一下」；连点当前已激活的标签也一样卡。修法是让 `TabState`
+    记住上次布局用的视口尺寸（`layout_w`/`layout_h`），新增 `EnsureLayout()` 只在尺寸变了才重排。
+    **不需要额外的「脏」标记**：所有会改页面内容的路径（导航完成、资源到齐、脚本改 DOM、表单输入）
+    本来就在改完之后强制走 `RelayoutTab`，而它会刷新这个记录。同一处还有第二份白干的活：
+    `OnAssetsDone` 也无条件重排，于是导航一次要把同一页连排两遍；现在只有「真的挂上了图片」
+    或「脚本改脏了 DOM」才重排。量这种开销**不能用 `GetTickCount64`**（分辨率约 15.6ms），
+    得上 `QueryPerformanceCounter`；日志阈值可以用 `ZB_PERF_MS` 调（默认 4ms，
+    排查时设 0 就能看到每一次重排）。
+40. **块级 `<a>` 整块点不动，我找了一阵才发现。** `CollectLinks` 只收集**带 link 标记的 run**，
+    而 `display:block` 的 `<a>` 会走 `PopulateBoxes` 变成一个盒子，它的文字是子盒里的普通 run、
+    从来没带过 link —— 于是整块链接在命中测试里根本不存在。真实站点的导航项、列表项大量这么写，
+    我的设置页语言选项也是这么写的（点了没反应才发现）。修法是在 `CollectLinks` 里把块级 `<a>`
+    自己的 `rect` 也追加成一个链接区域，并且**追加在子盒之后**，这样块里若嵌了行内链接，
     更精确的那个仍然先命中。
-41. **内置页要同时接受 `about:` 与 `browser://` 两种写法。** 主页上"查看解析器详情"
-    的 href 是 `about:parser`，而 `BuiltinHtml` 只认 `parser` / `browser://parser`，
-    于是那两个链接**一直静默跳回主页**（点得动，但去的是错的地方，比点不动更难发现）。
+41. **内置页要同时接受 `about:` 和 `browser://` 两种写法。** 主页上「查看解析器详情」的 href 是
+    `about:parser`，而 `BuiltinHtml` 只认 `parser` / `browser://parser`，于是那两个链接
+    **一直静默跳回主页** —— 点得动，但去的是错的地方，比点不动更难发现。
     现在统一剥掉 `about:` 前缀再匹配。
-42. **模板占位符的形状校验别写太窄。** 内置页用 `{{key}}` 占位，为了不把 CSS 花括号
-    误当占位符，我给 key 加了"只能是 a-z0-9."的校验 —— 结果 `{{about.barTitle}}`
-    因为有大写 `T` 被判定不是占位符，**原样打在页面上**。校验放宽到大写与下划线即可。
+42. **模板占位符的形状校验别写太窄。** 内置页用 `{{key}}` 占位，为了不把 CSS 花括号误当占位符，
+    我给 key 加了「只能是 a-z0-9.」的校验 —— 结果 `{{about.barTitle}}` 因为有大写 `T`
+    被判定不是占位符，**原样打在页面上**。校验放宽到大写与下划线就好了。
 
 ---
 

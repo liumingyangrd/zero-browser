@@ -260,6 +260,30 @@ python -m http.server 8765 --directory testpage
 
 ---
 
+## If the app will not start
+
+If Windows shows **"This app can't run on your PC"** after you double-click the exe, the message
+comes from the Windows loader and is returned before any of the browser's code runs — it means
+the executable could not be loaded, not that the browser crashed. Check, in order:
+
+1. **Is the file complete?** In the folder that holds it, verify with PowerShell (size and SHA256
+   are on the [Releases](https://github.com/liumingyangrd/zero-browser/releases) page):
+   ```powershell
+   $f = ".\zero-browser-v0.1.4-win32.exe"
+   (Get-Item $f).Length                                          # expect 3515113
+   (Get-FileHash $f -Algorithm SHA256).Hash
+   [BitConverter]::ToString([IO.File]::ReadAllBytes($f)[0..1])   # expect 4D-5A ("MZ")
+   ```
+   A length of 0, a hash that does not match, or first bytes other than `4D-5A` all mean the
+   download was truncated or replaced in transit (a proxy, antivirus, or an HTML block page saved
+   as `.exe`) — download it again. This was hit for real once: the download was a **0-byte** file.
+2. **Was the file blocked?** Right-click it → Properties → tick "Unblock" if present, and copy it
+   out of a cloud-synced or network folder (OneDrive, a mapped drive, a zip preview) into a plain
+   local folder such as `C:\zb\` before running it.
+3. **Is the machine ARM-based?** This is a 32-bit x86 (`PE32 / i386`) executable; on Windows on
+   ARM it needs the x86 emulation layer. If that is unavailable or disabled by policy, Windows
+   reports exactly this message. Check Settings → System → About → System type.
+
 ## Diagnostics and evidence
 
 `--shot` is a windowless render diagnostic: it reuses the **real** `Render` / `OnLButtonDown`

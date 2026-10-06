@@ -240,6 +240,28 @@ python -m http.server 8765 --directory testpage
 
 ---
 
+## 启动不了怎么排查
+
+双击 exe 后如果 Windows 弹出 **「This app can't run on your PC」**，这句话来自 Windows
+加载器，在任何浏览器代码执行之前就返回了 —— 它表示「这个可执行文件没能被加载」，
+不是浏览器崩溃。按顺序检查：
+
+1. **文件是不是完整的？** 在文件所在目录用 PowerShell 核对（大小与 SHA256 见
+   [Releases](https://github.com/liumingyangrd/zero-browser/releases) 页面）：
+   ```powershell
+   $f = ".\zero-browser-v0.1.4-win32.exe"
+   (Get-Item $f).Length                                          # 应为 3515113
+   (Get-FileHash $f -Algorithm SHA256).Hash
+   [BitConverter]::ToString([IO.File]::ReadAllBytes($f)[0..1])   # 应为 4D-5A（"MZ"）
+   ```
+   大小为 0、哈希不符、开头不是 `4D-5A`，都说明下载被截断或被替换（代理、杀软把拦截页
+   存成了 .exe 等）——重新下载即可。实测踩到过一次：下载下来的是 **0 字节**文件。
+2. **文件被锁定了吗？** 右键文件 → 属性 → 底部若有「解除锁定」就勾上；并把文件从
+   OneDrive / 映射盘 / 压缩包预览里**复制到本地普通目录**（例如 `C:\zb\`）再运行。
+3. **机器是 ARM 架构吗？** 本包是 32 位 x86（`PE32 / i386`）可执行文件，在 Windows on
+   ARM 上需要 x86 模拟层；模拟不可用或被策略关闭时，Windows 报的就是这句话。
+   可在「设置 → 系统 → 关于 → 系统类型」查看。
+
 ## 诊断与取证
 
 `--shot` 是无窗口渲染诊断模式：复用**真实的** `Render` / `OnLButtonDown` 代码路径，

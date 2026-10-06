@@ -22,3 +22,7 @@ CONTINUE_PROMPT.md
 *~
 Thumbs.db
 desktop.ini
+
+# Python 字节码（tools/ 下有 Python 脚本）
+__pycache__/
+*.pyc

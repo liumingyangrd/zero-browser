@@ -12,6 +12,9 @@ namespace zb {
 struct TextRun {
     std::string text;
     Rect rect;
+    // 这个 run 属于哪个 DOM 节点（文本节点或控件所在的元素）。
+    // 命中测试要按 run 反查节点才能把点击派发给 <button> 之类自绘控件。
+    Node* node = nullptr;
     std::string color;
     int font_size = 16;
     bool bold = false;

@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>脚本错误隔离</title></head>
+<body>
+<h1>错误隔离测试</h1>
+<div id="a">段一之前</div>
+<div id="b">段二之前</div>
+<div id="c">段三之前</div>
+
+<script>
+  document.getElementById('a').textContent = '段一已执行';
+  // 故意抛错：后面的脚本必须继续执行，页面必须继续渲染
+  throw new Error('故意抛出的错误');
+</script>
+
+<script>
+  document.getElementById('b').textContent = '段二已执行';
+  undefinedFunctionCall();   // 未定义函数：同样只影响本段
+  document.getElementById('b').textContent = '段二不该看到这行';
+</script>
+
+<script>
+  document.getElementById('c').textContent = '段三已执行';
+  while (true) { }           // 死循环：必须被步数预算掐断
+</script>
+
+<script>
+  document.getElementById('c').textContent = '段四已执行（死循环之后仍在跑）';
+</script>
+</body>
+</html>

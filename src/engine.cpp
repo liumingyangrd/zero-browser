@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "html.h"
+#include "js_dom.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -32,14 +33,15 @@ const char* kHomeHtml = R"HTML(<!DOCTYPE html>
   <div class="top"><div class="brand">ZERO Browser</div><div class="tag">自建渲染内核 · 演示首页</div></div>
   <div class="hero">
     <h1>一个不用 Chromium 的浏览器</h1>
-    <div class="sub">HTML 解析、CSS 解析、盒模型布局、绘制全部由本项目自己实现，不依赖任何现成浏览器内核。系统只负责传输、解码与出像素。这是当前网页引擎的渲染结果。</div>
+    <div class="sub">HTML 解析、CSS 解析、盒模型布局、绘制、JavaScript 解释器全部由本项目自己实现，不依赖任何现成浏览器内核。系统只负责传输、解码与出像素。这是当前网页引擎的渲染结果。</div>
   </div>
   <div class="cards">
     <div class="card"><h3>解析器</h3><p>自带 HTML 词法/语法解析与实体解码，生成 DOM 树。</p><p><a href="about:parser">查看解析器详情</a></p></div>
     <div class="card"><h3>CSS 引擎</h3><p>选择器（类/ID/后代/属性/结构伪类）、盒模型、flex 与 grid 布局、position 定位与 z-index。</p><p><a href="about:css">查看 CSS 能力</a></p></div>
+    <div class="card"><h3>脚本引擎</h3><p>自研 ES5 子集解释器：DOM 操作、事件冒泡、定时器。死循环与无限递归有护栏，脚本报错不影响页面渲染。</p></div>
     <div class="card"><h3>媒体与绘制</h3><p>图片/背景图经 WIC 解码、视频帧经 Media Foundation 解码，缩放、裁剪、合成与滚动全部自研。</p></div>
   </div>
-  <div class="foot">Zero Browser 0.1.3 · 自研渲染内核 · 页面由 zero-browser 渲染</div>
+  <div class="foot">Zero Browser 0.1.4 · 自研渲染内核 · 页面由 zero-browser 渲染</div>
 </body></html>
 )HTML";
 
@@ -118,7 +120,7 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
       <tr><td>布局引擎</td><td>内置（block / inline / flex / grid / position）</td></tr>
       <tr><td>传输与解码</td><td>WinHTTP / Media Foundation / WIC / WASAPI（仅底层管道）</td></tr>
       <tr><td>渲染</td><td>GDI 像素输出，无 WebView / Chromium</td></tr>
-      <tr><td>版本</td><td>0.1.3</td></tr>
+      <tr><td>版本</td><td>0.1.4</td></tr>
     </table>
   </div>
 </body></html>
@@ -650,6 +652,8 @@ const Box* FindVideoBox(const Box* box, int x, int y, bool want_fixed,
 struct InlinePiece {
     std::string text;
     Style style;
+    // 来源节点（命中测试与事件派发要按 run 反查 DOM）
+    Node* node = nullptr;
     bool link = false;
     std::string href;
     bool hard_break = false;
@@ -817,6 +821,7 @@ void CollectInline(const Node* node, Style parent,
         p.link = link;
         p.href = parent_href;
         p.widget = node->tag;
+        p.node = (Node*)node;
         int fh = LineHeightOf(s, nullptr);
         if (node->tag == "textarea") {
             p.widget_w = !s.width.is_auto
@@ -982,6 +987,7 @@ int LayoutInlineInto(Box& box, const std::vector<InlinePiece>& pieces,
             TextRun tr;
             tr.widget = piece.widget;
             tr.widget_value = piece.widget_value;
+            tr.node = piece.node;
             tr.link = piece.link;
             tr.href = piece.href;
             tr.rect.h = ih;
@@ -2241,6 +2247,135 @@ void Page::ParseHtml(const std::string& html, const std::string& url) {
     if (title) data_.title = Trim(TextOf(title));
     if (data_.title.empty()) data_.title = url.empty() ? "页面" : url;
     BuildMediaPlayers();
+    // 收集 <script>：内联正文记下来，外链记 src（正文由导航线程取好）。
+    // 顺序必须保持文档顺序，脚本之间的依赖关系靠它。
+    scripts_.clear();
+    external_scripts_.clear();
+    scripts_ran_ = false;
+    js_.reset();
+    {
+        std::vector<Node*> stack;
+        stack.push_back(root_.get());
+        while (!stack.empty()) {
+            Node* n = stack.back();
+            stack.pop_back();
+            // 逆序入栈，保证出栈顺序是文档顺序
+            for (auto it = n->children.rbegin(); it != n->children.rend(); ++it) {
+                stack.push_back(it->get());
+            }
+            if (n->type != NodeType::Element || n->tag != "script") continue;
+            std::string type = Lower(Trim(n->Attr("type")));
+            if (!type.empty() && type.find("javascript") == std::string::npos &&
+                type != "module") {
+                continue;  // application/json 之类的数据块不执行
+            }
+            std::string src = Trim(n->Attr("src"));
+            if (!src.empty()) {
+                scripts_.push_back({true, ResolveUrl(data_.final_url, src)});
+            } else {
+                std::string code = NodeText(n);
+                if (!Trim(code).empty()) scripts_.push_back({false, code});
+            }
+        }
+    }
+}
+
+void Page::SetExternalScripts(
+    const std::map<std::string, std::string>& texts) {
+    external_scripts_ = texts;
+}
+
+// 布局完成后执行脚本：这一段是"页面活起来"的关键。
+// 约定：任何脚本错误都只记录、不上抛，渲染流程必须继续。
+bool Page::RunScripts() {
+    if (scripts_.empty() || !root_) return false;
+    if (scripts_ran_) return false;
+    scripts_ran_ = true;
+    std::string base = data_.final_url.empty() ? data_.url : data_.final_url;
+    js_ = std::make_shared<JsRuntime>(this, base);
+    int index = 0;
+    for (const auto& s : scripts_) {
+        ++index;
+        if (s.first) {
+            auto it = external_scripts_.find(s.second);
+            if (it == external_scripts_.end() || Trim(it->second).empty()) {
+                continue;  // 外链没取到（网络失败）：跳过，不影响后面的脚本
+            }
+            js_->AddScript(it->second, "外链脚本 " + std::to_string(index));
+        } else {
+            js_->AddScript(s.second, "内联脚本 " + std::to_string(index));
+        }
+    }
+    js_->RunPendingScripts();
+    js_->DispatchLoad();
+    return js_->TakeDirty();
+}
+
+const Node* Page::NodeAt(int x, int y) const {
+    if (!root_box_) return nullptr;
+    // 屏幕坐标 -> 文档坐标（fixed 子树不随滚动，对它们用未加滚动的 y）
+    struct Walk {
+        int px;
+        int py;
+        int fpy;
+        const Node* best = nullptr;
+        // 盒级匹配：先认盒子自己的节点，再认盒内的 run。
+        // 自绘控件（button/input/...）在本引擎里是 run 而不是 Box，
+        // 只走盒树永远命不中按钮，点击事件也就派发不到它身上。
+        void Visit(const Box* b) {
+            if (!b || b->hidden) return;
+            int yy = b->fixed ? fpy : py;
+            auto inside = [&](const Rect& r) {
+                return px >= r.x && px < r.x + r.w && yy >= r.y &&
+                       yy < r.y + r.h;
+            };
+            if (b->node && inside(b->rect)) best = b->node;
+            for (const TextRun& run : b->runs) {
+                if (run.node && inside(run.rect)) best = run.node;
+            }
+            for (const auto& c : b->children) Visit(c.get());
+        }
+    } w{x, y + scroll_y_, y, nullptr};
+    w.Visit(root_box_.get());
+    return w.best;
+}
+
+bool Page::DispatchPageClick(int x, int y) {
+    if (!js_) return false;
+    const Node* target = NodeAt(x, y);
+    if (!target) return false;
+    return js_->DispatchClick(target, x, y);
+}
+
+bool Page::RunJsTimers() {
+    if (!js_) return false;
+    return js_->RunTimers();
+}
+
+int Page::NextJsTimerDelayMs() const {
+    return js_ ? js_->NextTimerDelayMs() : -1;
+}
+
+bool Page::TakeJsDirty() { return js_ ? js_->TakeDirty() : false; }
+
+std::string Page::TakeJsNavigation() {
+    return js_ ? js_->TakePendingNavigation() : std::string();
+}
+
+bool Page::TakeJsReload() { return js_ ? js_->TakeReloadRequest() : false; }
+
+int Page::JsScriptCount() const {
+    return js_ ? js_->Stats().scripts : 0;
+}
+
+int Page::JsScriptFailures() const {
+    return js_ ? js_->Stats().failed : 0;
+}
+
+std::string Page::JsLastError() const {
+    if (!js_) return "";
+    if (js_->Stats().failed > 0) return js_->LastError();
+    return "";
 }
 
 void Page::Relayout(int viewport_w, int viewport_h, Canvas* measurer) {

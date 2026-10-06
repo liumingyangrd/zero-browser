@@ -120,6 +120,8 @@ private:
     void OnKeyEx(UINT key, bool ctrl, bool shift);
     void OnChar(wchar_t ch);
     void OnTimer(UINT_PTR id);
+    // JS 定时器心跳：setTimeout / setInterval / requestAnimationFrame。
+    void OnJsTick();
 
     // 地址栏编辑：选择区、剪贴板、右键菜单。
     bool AddressHasSelection() const;
@@ -152,7 +154,8 @@ private:
                         const std::string& html, const std::string& final_url,
                         const std::string& error, bool add_history,
                         const std::map<std::string, std::shared_ptr<Image>>&
-                            images);
+                            images,
+                        const std::map<std::string, std::string>& scripts);
     void OnNavigationDone(LPARAM l);
     std::string CurrentUrl() const;
     TabState& ActiveTab();
@@ -183,6 +186,8 @@ private:
     int drag_down_x_ = 0;
     UINT_PTR caret_timer_ = 1;
     UINT_PTR video_timer_ = 2;
+    // JS 定时器心跳：60ms 一跳，页面没有脚本时只是一次分支判断。
+    UINT_PTR js_timer_ = 3;
     int nav_seq_ = 0;
 
     Rect page_view_;

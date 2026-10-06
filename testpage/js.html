@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>JavaScript 测试页</title>
+<style>
+  body { margin: 0; padding: 16px; font-size: 16px; color: #0f172a; background: #ffffff; }
+  h1 { font-size: 22px; margin: 0 0 12px 0; }
+  #app { padding: 10px; background: #eef2ff; border: 1px solid #c7d2fe; }
+  #app.clicked { background: #dcfce7; border-color: #86efac; }
+  .row { margin-top: 10px; padding: 6px 10px; background: #f1f5f9; }
+  .item { padding: 4px 8px; margin-top: 4px; background: #fef9c3; }
+  button { padding: 8px 16px; font-size: 16px; }
+  #counter, #timer, #json { font-family: monospace; }
+</style>
+</head>
+<body>
+<h1>JavaScript 测试页</h1>
+
+<div id="app">脚本未执行时的初始内容</div>
+
+<div class="row">脚本写入的列表：</div>
+<div id="list"></div>
+
+<div class="row">计数器：<span id="counter">未执行</span></div>
+<div class="row">定时器：<span id="timer">未执行</span></div>
+<div class="row">JSON/内置对象：<span id="json">未执行</span></div>
+
+<button id="btn" onclick="onInlineClick()">点我</button>
+
+<script>
+  // 1) DOM 改写
+  document.getElementById('app').innerHTML = '<b>脚本已执行</b>';
+
+  // 2) 创建节点并插入
+  var items = ['A', 'B', 'C'];
+  var list = document.getElementById('list');
+  items.forEach(function (t) {
+    var d = document.createElement('div');
+    d.className = 'item';
+    d.textContent = 'item-' + t;
+    list.appendChild(d);
+  });
+
+  // 3) 计数 + 字符串处理
+  document.getElementById('counter').textContent =
+    'count=' + items.length + ' joined=' + items.join('|');
+
+  // 4) JSON 与内置对象
+  var data = { name: 'zero', nums: [1, 2, 3], ok: true };
+  var parsed = JSON.parse(JSON.stringify(data));
+  var sum = parsed.nums.reduce(function (a, b) { return a + b; }, 0);
+  document.getElementById('json').textContent =
+    'name=' + parsed.name + ' sum=' + sum + ' upper=' + 'abc'.toUpperCase();
+
+  // 5) 定时器（--shot 的等待期间会跑）
+  setTimeout(function () {
+    document.getElementById('timer').textContent = 'timeout-ran';
+  }, 10);
+  var ticks = 0;
+  var iv = setInterval(function () {
+    ticks++;
+    document.getElementById('timer').textContent = 'interval-ticks=' + ticks;
+    if (ticks >= 2) clearInterval(iv);
+  }, 20);
+
+  // 6) 事件：内联属性 onclick 与本函数的配合
+  var clicks = 0;
+  function onInlineClick() {
+    clicks++;
+    document.getElementById('counter').textContent = 'clicks=' + clicks;
+  }
+
+  // 7) addEventListener
+  document.getElementById('btn').addEventListener('click', function (e) {
+    document.getElementById('app').className = 'clicked';
+    document.getElementById('app').textContent =
+      'clicked-target=' + e.target.tagName;
+  });
+
+  // 8) 遍历与条件
+  var total = 0;
+  for (var i = 1; i <= 4; i++) {
+    if (i % 2 === 0) total += i;
+  }
+  var p = document.createElement('p');
+  p.textContent = 'even-sum=' + total;
+  document.body.appendChild(p);
+</script>
+</body>
+</html>

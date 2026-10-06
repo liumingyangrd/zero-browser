@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include "js_dom.h"
 #include "network.h"
 
 #include <cmath>
@@ -258,6 +259,8 @@ struct NavResult {
     std::string error;
     bool add_history = false;
     std::map<std::string, std::shared_ptr<Image>> images;
+    // 外链脚本正文（<script src>），与图片一样由导航线程取回。
+    std::map<std::string, std::string> scripts;
 };
 
 bool FileExists(const std::string& path) {
@@ -476,6 +479,62 @@ std::string Base64Decode(const std::string& s) {
         }
     }
     return out;
+}
+
+// 在导航线程里扫描 <script src>，取回正文文本。
+// 与图片一样只做传输：脚本的解析与执行在页面线程（js_dom）。
+void LoadScriptsForHtml(const std::string& html, const std::string& base_url,
+                        std::map<std::string, std::string>& out) {
+    std::string lower = ToLowerAscii(html);
+    size_t pos = 0;
+    std::vector<std::string> urls;
+    while (true) {
+        size_t tag = lower.find("<script", pos);
+        if (tag == std::string::npos) break;
+        size_t end = lower.find('>', tag);
+        if (end == std::string::npos) break;
+        std::string head = html.substr(tag, end - tag + 1);
+        pos = end + 1;
+        std::string src = Trim(ExtractAttr(head, "src"));
+        if (src.empty()) continue;
+        std::string type = Lower(Trim(ExtractAttr(head, "type")));
+        if (!type.empty() && type.find("javascript") == std::string::npos &&
+            type != "module") {
+            continue;
+        }
+        std::string abs = ResolveUrl(base_url, src);
+        if (!StartsWith(abs, "http://") && !StartsWith(abs, "https://") &&
+            !StartsWith(abs, "file://")) {
+            continue;
+        }
+        if (out.count(abs)) continue;
+        bool dup = false;
+        for (const std::string& u : urls) {
+            if (u == abs) dup = true;
+        }
+        if (!dup) urls.push_back(abs);
+    }
+    if (urls.empty()) return;
+    std::vector<std::string> bodies(urls.size());
+    std::vector<std::thread> pool;
+    size_t workers = std::min<size_t>(6, urls.size());
+    for (size_t w = 0; w < workers; ++w) {
+        pool.emplace_back([&, w]() {
+            for (size_t i = w; i < urls.size(); i += workers) {
+                if (StartsWith(urls[i], "file://")) {
+                    bodies[i] = ReadFileUtf8(urls[i].substr(7));
+                    continue;
+                }
+                FetchResult res;
+                FetchUrlWithCookies(urls[i], &res, 15000);
+                if (res.ok) bodies[i] = res.html;
+            }
+        });
+    }
+    for (auto& t : pool) t.join();
+    for (size_t i = 0; i < urls.size(); ++i) {
+        if (!bodies[i].empty()) out[urls[i]] = bodies[i];
+    }
 }
 
 // 在导航线程里扫描 <img>，抓取并解码图片字节。只做传输/解码：
@@ -914,6 +973,9 @@ bool BrowserApp::CreateMainWindow(bool visible, int width, int height) {
 
     SetTimer(hwnd_, caret_timer_, 450, nullptr);
     SetTimer(hwnd_, video_timer_, 33, nullptr);
+    // JS 定时器心跳。60ms 是 setTimeout(fn,0) 与 requestAnimationFrame 的
+    // 实际粒度下限；页面没有脚本时 OnJsTick 只做一次判断就返回。
+    SetTimer(hwnd_, js_timer_, 60, nullptr);
     TabState home;
     home.url = "browser://home";
     tabs_.push_back(std::move(home));
@@ -1114,8 +1176,11 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         address_focused_ = true;
         if (!opt.clipboard.empty()) {
             bool ok = WriteClipboardText(hwnd_, opt.clipboard);
-            std::printf("[address] clipboard-set bytes=%zu ok=%d\n",
-                        opt.clipboard.size(), ok ? 1 : 0);
+            // 带上 GetLastError：OpenClipboard 被别的进程占用时会直接失败，
+            // 只打 ok=0 没法定位（实测踩到过 ok=0 但不知道为什么）。
+            std::printf("[address] clipboard-set bytes=%zu ok=%d err=%lu\n",
+                        opt.clipboard.size(), ok ? 1 : 0,
+                        ok ? 0UL : (unsigned long)GetLastError());
         }
         if (opt.select_all) {
             OnKeyEx('A', true, false);
@@ -1170,12 +1235,8 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
         PumpMessages(50);
     }
 
-    if (opt.dump_boxes && active_ >= 0 && active_ < (int)tabs_.size()) {
-        const TabState& tab = tabs_[active_];
-        std::printf("== 布局树 ==\n");
-        DumpBoxTree(tab.page.RootBox(), page_view_, tab.scroll, 0);
-    }
-
+    // 先截图，再投递点击，最后 dump 布局树 —— dump 要反映"点击之后"的最终状态，
+    // 否则用 --click 验证事件处理器时看到的永远是点击前的内容。
     auto shoot = [&](const std::string& path) -> bool {
         canvas.FillRect(0, 0, opt.width, opt.height, 0xf1f5f9);
         Render(canvas);
@@ -1210,6 +1271,23 @@ bool BrowserApp::HeadlessShot(const ShotOptions& opt) {
     }
 
     if (old_dib) SelectObject(dibdc, old_dib);
+    if (opt.dump_boxes && active_ >= 0 && active_ < (int)tabs_.size()) {
+        const TabState& tab = tabs_[active_];
+        std::printf("== 布局树（点击之后）==\n");
+        DumpBoxTree(tab.page.RootBox(), page_view_, tab.scroll, 0);
+        if (tab.page.Js()) {
+            std::printf("[js] 脚本数=%d 失败=%d 监听器=%zu 定时器=%d\n",
+                        tab.page.JsScriptCount(), tab.page.JsScriptFailures(),
+                        tab.page.Js()->ListenerCount(),
+                        tab.page.Js()->TimerCount());
+            std::string jerr = tab.page.JsLastError();
+            if (!jerr.empty()) std::printf("[js] 最近错误: %s\n", jerr.c_str());
+            for (const std::string& line : tab.page.Js()->ScriptLog()) {
+                std::printf("%s\n", line.c_str());
+            }
+        }
+    }
+
     if (dib) DeleteObject(dib);
     DeleteDC(dibdc);
     DeleteDC(mem);
@@ -1634,6 +1712,29 @@ void BrowserApp::OnLButtonDown(int x, int y) {
         // 否则地址栏会一直显示用户敲了一半却没导航的文本。
         AddressClearSelection();
         SyncAddress();
+        // 先把点击交给页面脚本：处理器可能 preventDefault 掉默认动作
+        // （比如 <a onclick="return false">），也可能自己发起导航。
+        if (active_ >= 0 && active_ < (int)tabs_.size()) {
+            TabState& t = tabs_[active_];
+            int jx = x - page_view_.x;
+            int jy = y - page_view_.y;
+            if (t.page.Js()) {
+                t.page.DispatchPageClick(jx, jy + t.scroll);
+                std::string js_nav = t.page.TakeJsNavigation();
+                bool js_reload = t.page.TakeJsReload();
+                bool js_dirty = t.page.TakeJsDirty();
+                if (js_dirty) RelayoutTab(active_);
+                if (!js_nav.empty()) {
+                    NavigateTo(js_nav, true);
+                    return;
+                }
+                if (js_reload) {
+                    NavigateTo(CurrentUrl(), false);
+                    return;
+                }
+                if (js_dirty) InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+        }
         if (active_ >= 0 && active_ < (int)tabs_.size()) {
             TabState& tab = tabs_[active_];
             int px = x - page_view_.x;
@@ -2022,7 +2123,32 @@ void BrowserApp::OnChar(wchar_t ch) {
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+// JS 定时器心跳：setTimeout / setInterval / requestAnimationFrame 在这里执行。
+// 页面没有脚本时只做一次判断就返回，因此 60ms 一跳的开销可以忽略。
+void BrowserApp::OnJsTick() {
+    if (active_ < 0 || active_ >= (int)tabs_.size()) return;
+    TabState& tab = tabs_[active_];
+    if (!tab.page.Js()) return;
+    bool ran = tab.page.RunJsTimers();
+    bool dirty = tab.page.TakeJsDirty();
+    if (dirty) RelayoutTab(active_);
+    std::string js_nav = tab.page.TakeJsNavigation();
+    if (!js_nav.empty()) {
+        NavigateTo(js_nav, true);
+        return;
+    }
+    if (tab.page.TakeJsReload()) {
+        NavigateTo(CurrentUrl(), false);
+        return;
+    }
+    if (ran || dirty) InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void BrowserApp::OnTimer(UINT_PTR id) {
+    if (id == js_timer_) {
+        OnJsTick();
+        return;
+    }
     if (id == video_timer_) {
         if (active_ >= 0 && active_ < (int)tabs_.size()) {
             if (tabs_[active_].page.UpdateMedia()) {
@@ -2075,7 +2201,8 @@ void BrowserApp::OnNavigationDone(LPARAM l) {
     NavResult* raw = reinterpret_cast<NavResult*>(l);
     if (!raw) return;
     FinishNavigate(raw->tab_index, raw->seq, raw->requested, raw->html,
-                   raw->final_url, raw->error, raw->add_history, raw->images);
+                   raw->final_url, raw->error, raw->add_history, raw->images,
+                   raw->scripts);
     delete raw;
 }
 
@@ -2085,7 +2212,8 @@ void BrowserApp::FinishNavigate(int tab_index, int seq,
                                 const std::string& final_url,
                                 const std::string& error, bool add_history,
                                 const std::map<std::string,
-                                               std::shared_ptr<Image>>& images) {
+                                               std::shared_ptr<Image>>& images,
+                                const std::map<std::string, std::string>& scripts) {
     if (tab_index < 0 || tab_index >= (int)tabs_.size()) return;
     TabState& tab = tabs_[tab_index];
     if (tab.pending_seq != seq) return;
@@ -2096,7 +2224,11 @@ void BrowserApp::FinishNavigate(int tab_index, int seq,
     tab.url = resolved;
     tab.page.ParseHtml(html, resolved);
     tab.page.SetImages(images);
+    tab.page.SetExternalScripts(scripts);
     RelayoutTab(tab_index);
+    // 脚本在首次布局之后执行：DOM 几何（getBoundingClientRect 等）这时才有值，
+    // 脚本改过 DOM 就再布局一次。
+    if (tab.page.RunScripts()) RelayoutTab(tab_index);
     tab.scroll = 0;
     tab.title = tab.page.Data().title;
     if (tab.title.empty()) tab.title = resolved;
@@ -2146,8 +2278,10 @@ void BrowserApp::StartNavigate(const std::string& url, bool add_history) {
         res->final_url = final_url;
         res->error = error;
         res->add_history = add_history;
-        LoadImagesForHtml(html, final_url.empty() ? target : final_url,
-                          res->images);
+        std::string res_base = final_url.empty() ? target : final_url;
+        LoadImagesForHtml(html, res_base, res->images);
+        // 外链脚本与图片一样在导航线程取回：UI 线程只负责解析与执行
+        LoadScriptsForHtml(html, res_base, res->scripts);
         if (!PostMessage(hwnd, kMsgNavigationDone, 0, (LPARAM)res)) {
             delete res;
         }

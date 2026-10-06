@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>外链脚本测试</title>
+<script src="jsext.js"></script>
+</head>
+<body>
+<h1>外链脚本测试</h1>
+<div id="ext">外链未执行</div>
+<div id="ext2">未执行</div>
+<script>
+  document.getElementById('ext2').textContent += ' / 内联也执行了';
+  var flag = (typeof window.__extLoaded !== 'undefined' && window.__extLoaded)
+    ? 'ext-flag=true' : 'ext-flag=false';
+  var d = document.createElement('div');
+  d.textContent = flag;
+  document.body.appendChild(d);
+</script>
+</body>
+</html>

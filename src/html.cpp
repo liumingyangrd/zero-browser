@@ -112,7 +112,15 @@ std::string DecodeEntities(const std::string& s) {
 
 }  // namespace
 
-std::unique_ptr<Node> ParseHtml(const std::string& source) {
+std::unique_ptr<Node> ParseHtml(const std::string& source_raw) {
+    // 拷贝一份再处理：下面要按需剥掉 UTF-8 BOM。
+    // 不剥的后果实测过：带 BOM 的页面会把 "<!doctype" 当成正文文字渲染出来
+    // （Windows 上"另存为 UTF-8"默认就带 BOM，真实站点偶尔也有）。
+    std::string source = source_raw;
+    if (source.size() >= 3 && (unsigned char)source[0] == 0xEF &&
+        (unsigned char)source[1] == 0xBB && (unsigned char)source[2] == 0xBF) {
+        source.erase(0, 3);
+    }
     auto root = std::unique_ptr<Node>(MakeElement("html"));
 
     bool has_html = source.find("<html") != std::string::npos;
@@ -173,9 +181,19 @@ std::unique_ptr<Node> ParseHtml(const std::string& source) {
                 i = end == std::string::npos ? n : end + 3;
                 continue;
             }
-            if (i + 9 <= n && source.compare(i, 9, "<!DOCTYPE") == 0) {
-                size_t end = source.find('>', i + 9);
-                i = end == std::string::npos ? n : end + 1;
+            // 声明区（<!doctype ...> / <![CDATA[...]]> 等）整体跳过。
+            // 原来只认大写 "<!DOCTYPE"：真实页面普遍写小写 `<!doctype html>`，
+            // 于是整整一行 doctype 被当成正文渲染出来（每个页面顶部多一行乱码）。
+            // 这里改成大小写不敏感，并且对所有 `<!` 开头都按声明处理。
+            if (i + 2 <= n && source[i + 1] == '!') {
+                bool cdata = i + 9 <= n && Lower(source.substr(i, 9)) == "<![cdata[";
+                if (cdata) {
+                    size_t end = source.find("]]>", i + 9);
+                    i = end == std::string::npos ? n : end + 3;
+                } else {
+                    size_t end = source.find('>', i + 2);
+                    i = end == std::string::npos ? n : end + 1;
+                }
                 continue;
             }
 
@@ -304,6 +322,36 @@ std::unique_ptr<Node> ParseHtml(const std::string& source) {
 
     flush_raw();
     return root;
+}
+
+// HTML 片段解析：innerHTML 与 document.write 用。
+// 直接复用整页解析器，再把合成的 html/body 外壳剥掉 —— 不剥的话
+// el.innerHTML = '<b>x</b>' 会在元素里再套一层 html>body（实测出现嵌套壳，
+// 布局层级与 CSS 选择器都会跟着错）。
+std::vector<std::unique_ptr<Node>> ParseHtmlFragment(const std::string& source) {
+    std::vector<std::unique_ptr<Node>> out;
+    std::unique_ptr<Node> root = ParseHtml(source);
+    if (!root) return out;
+    Node* container = root.get();
+    if (container->tag == "html") {
+        // 内容都在合成的 body 里；没有 body 就用 html 本身（跳过 head）
+        Node* body = nullptr;
+        for (auto& c : container->children) {
+            if (c->type == NodeType::Element && c->tag == "body") {
+                body = c.get();
+                break;
+            }
+        }
+        container = body ? body : root.get();
+    }
+    for (auto& c : container->children) {
+        if (container == root.get() && c->type == NodeType::Element &&
+            c->tag == "head") {
+            continue;  // 片段里的 head 内容（meta/style）对插入没有意义
+        }
+        out.push_back(std::move(c));
+    }
+    return out;
 }
 
 }  // namespace zb

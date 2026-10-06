@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>JS 改样式后重新布局</title>
+<style>
+  body { margin: 0; padding: 10px; font-size: 16px; }
+  .box { padding: 10px; background: #eef2ff; border: 1px solid #c7d2fe; margin-top: 6px; }
+  .hidden { display: none; }
+  .big { font-size: 28px; }
+  #tall { height: 60px; background: #fee2e2; }
+</style>
+</head>
+<body>
+<div id="one" class="box">块一</div>
+<div id="two" class="box">块二</div>
+<div id="three" class="box">块三</div>
+<div id="tall">固定高度块</div>
+<div id="out">状态：初始</div>
+
+<script>
+  // 用 classList 隐藏一个块：布局必须跟着变（content_height 会变小）
+  document.getElementById('two').classList.add('hidden');
+  // 用 style 直接改尺寸：同样要重新布局
+  document.getElementById('three').style.fontSize = '28px';
+  document.getElementById('three').style.backgroundColor = '#dcfce7';
+  // 用 setAttribute 改 class
+  document.getElementById('one').setAttribute('class', 'box big');
+  // 删掉固定高度块
+  var tall = document.getElementById('tall');
+  tall.parentNode.removeChild(tall);
+  document.getElementById('out').textContent = '状态：已修改（two 隐藏 / three 放大 / tall 移除）';
+</script>
+</body>
+</html>

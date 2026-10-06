@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.4-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -53,6 +53,86 @@ CSS 支持标签 / 类 / id / 后代 / `>` / 逗号分组 / `*` / **属性选择
 
 ![CSS Grid](docs/screenshots/grid.png)
 
+### JavaScript（自研 ES5 子集解释器）
+
+**没有引入 V8 / QuickJS / Duktape 等任何第三方引擎**，解释器自己实现，分文件如下：
+
+| 文件 | 职责 |
+| --- | --- |
+| `src/js.cpp` | 词法分析与语法分析，产出语法树 |
+| `src/js_eval.cpp` | 求值器：语句/表达式、作用域、调用与步数预算 |
+| `src/js_builtins.cpp` | 内置方法表（按接收者类型分派） |
+| `src/js_globals.cpp` | `Math` / `JSON` / `Date` / `Error` / `console` 等全局对象 |
+| `src/js_dom.cpp` | DOM 绑定：`document` / 元素 / `window` / `location` / 事件 / 定时器 |
+| `src/js.h`、`src/js_internal.h` | 对外接口与解释器内部接口 |
+
+**语言特性**：`var` / `let` / `const`（**无块级作用域**，`let`/`const` 等价 `var`）、
+函数声明 / 函数表达式 / 箭头函数、闭包、递归、变量与函数提升、对象与数组字面量、
+计算属性名、模板字符串（**不支持 `${}` 插值**，遇到会明确报错）、
+`for` / `for-in` / `for-of` / `while` / `do-while`、`switch` / `case` / `default`、
+`try` / `catch` / `finally` / `throw`、`break` / `continue`、`++` / `--` / 复合赋值、
+三元、`typeof` / `instanceof` / `in` / `delete` / `void`、位运算、宽松与严格相等。
+
+**内置对象**：
+
+| 对象 | 已实现 |
+| --- | --- |
+| `Object` | `keys` / `values` / `entries` / `assign` / `create` / `defineProperty` / `freeze` |
+| `Array` | `push` / `pop` / `shift` / `unshift` / `slice` / `splice` / `concat` / `join` / `indexOf` / `lastIndexOf` / `includes` / `forEach` / `map` / `filter` / `some` / `every` / `find` / `findIndex` / `reduce` / `sort` / `reverse` / `toString`，静态 `isArray` / `from` / `of` |
+| `String` | `charAt` / `charCodeAt` / `indexOf` / `lastIndexOf` / `includes` / `startsWith` / `endsWith` / `slice` / `substring` / `substr` / `toUpperCase` / `toLowerCase` / `trim` / `trimStart` / `trimEnd` / `split` / `replace` / `replaceAll` / `concat` / `repeat` / `padStart` / `padEnd` / `localeCompare`，静态 `fromCharCode` |
+| `Number` | `toFixed` / `toString(radix)` / `isNaN` / `isFinite` |
+| `Math` | `abs` / `floor` / `ceil` / `round` / `sqrt` / `pow` / `max` / `min` / `random` / `sin` / `cos` / `tan` / `log` / `exp` / `sign` / `trunc` 与 `PI` / `E` / `LN2` |
+| `JSON` | `parse` / `stringify`（**遇环形引用报错**，不是无限递归） |
+| `Date` | `now` / `parse` 与 `getTime` / `getFullYear` / `getMonth` / `getDate` / `getHours` / `getMinutes` / `getSeconds` / `getDay` / `toISOString` / `toString` |
+| `Error` | `Error` / `TypeError` / `RangeError` / `ReferenceError` / `SyntaxError` |
+| 全局函数 | `parseInt` / `parseFloat` / `isNaN` / `isFinite` / `String` / `Number` / `Boolean` / `Array` / `Object` / `Function` / `encodeURI(Component)` / `decodeURI(Component)` |
+| 输出 | `console.log` / `info` / `warn` / `error` / `debug`、`alert`（**写进脚本日志**，不弹系统对话框） |
+
+**DOM 绑定**：
+
+- `document`：`getElementById` / `getElementsByTagName` / `getElementsByClassName` /
+  `querySelector` / `querySelectorAll` / `createElement` / `createTextNode` /
+  `write` / `writeln` / `body` / `head` / `documentElement` / `title` / `readyState` /
+  `URL` / `cookie`（**只读**）/ `addEventListener`
+- 元素：`tagName` / `id` / `className` / `classList.add·remove·toggle·contains` /
+  `style.xxx` 与 `style.cssText` / `style.setProperty` / `innerHTML` / `outerHTML` /
+  `textContent` / `innerText` / `children` / `childNodes` / `parentNode` /
+  `nextSibling` / `previousSibling` / `firstChild` / `lastChild` /
+  `appendChild` / `insertBefore` / `removeChild` / `replaceChild` /
+  `setAttribute` / `getAttribute` / `removeAttribute` / `hasAttribute` /
+  `getBoundingClientRect` / `offsetWidth` / `offsetHeight` / `offsetTop` / `offsetLeft` /
+  `value` / `checked` / `href` / `src` / `click` / `addEventListener` / `querySelector…`
+- `window`：`document` / `location` / `innerWidth` / `innerHeight` / `scrollY` /
+  `scrollTo` / `addEventListener` / `getComputedStyle`（返回 `undefined`）
+- `location`：`href` / `pathname` / `search` / `hash` / `host` / `hostname` / `protocol` /
+  `origin` / `assign` / `replace` / `reload`
+
+**事件**：`addEventListener` 与内联属性（`onclick="..."`）都支持，**会冒泡**到
+`document` 与 `window`；事件对象有 `type` / `target` / `currentTarget` / `clientX` /
+`clientY` / `preventDefault()` / `stopPropagation()` / `defaultPrevented`；
+处理器返回 `false` 等价于 `preventDefault`；点击 `<a href>` 的默认动作会导航
+（除非被 `preventDefault`）。
+外壳把真实点击交给脚本：命中测试按布局树里的 run / 盒**反查 DOM 节点**
+（自绘控件 `button` / `input` 是 run 而不是 Box，见踩坑第 33 条）。
+
+**定时器**：`setTimeout` / `setInterval` / `clearTimeout` / `clearInterval` /
+`requestAnimationFrame`，由外壳 **60ms 心跳**（`WM_TIMER`）驱动，**上限 512 个**。
+
+**脚本执行**：内联 `<script>` 与外链 `<script src>` 都执行；**外链正文由导航线程与
+图片一起并行取回，不阻塞 UI**；按文档顺序执行；首次布局完成后执行，
+随后派发 `load` / `DOMContentLoaded`。
+
+**安全与隔离**（这是本层最重要的设计）：
+
+- 每段脚本**单独执行**，异常只记录、**不上抛**，绝不中断渲染
+- **死循环**由步数预算掐断（**2000 万步 / 段**）
+- **无限递归**由调用深度护栏拦住（**200 层** + 8MB 线程栈）
+- `null.x`、调用非函数、语法错误都只影响该段脚本，页面继续渲染
+- `JSON.stringify` 遇环形引用报错，而不是无限递归
+
+> 这一层只做「真实站点常见脚本」的覆盖面，不追求完整语言规范。
+> 语言、内置对象、DOM 与全局对象的缺口都逐条列在[尚未实现](#尚未实现)里。
+
 ### position 定位与 z-index
 
 `relative` 在原位偏移；`absolute` 脱离文档流；`fixed` 相对视口定位、滚动时保持悬浮；
@@ -88,8 +168,11 @@ CSS 支持标签 / 类 / id / 后代 / `>` / 逗号分组 / `*` / **属性选择
 ![洛谷首页](docs/screenshots/luogu.png)
 
 > 这两张是**真实抓取**的结果，不是本地仿制页。版式仍比 Edge 粗糙，原因见
-> [尚未实现](#尚未实现)：没有 JS，因此依赖脚本的交互（登录、播放、缩略图懒加载）
-> 仍然不可用。
+> [尚未实现](#尚未实现)：脚本子集覆盖面有限，也没有 `fetch` / `XHR`，因此强依赖接口
+> 与完整语言特性的交互（登录、播放、无限下拉）仍然不可用。
+>
+> 上面两张图是 **0.1.3 及更早**（还没有 JS 支持）时的取证结果。0.1.4 起
+> `<script>` 会真正执行，见上面的 [JavaScript 章节](#javascript自研-es5-子集解释器)。
 
 ---
 
@@ -164,6 +247,8 @@ python -m http.server 8765 --directory testpage
 
 ```bat
 :: 页面截图 + 打印布局树（文档坐标与屏幕坐标、盒内 runs、播放器状态）
+::   注意 --dump-boxes 是在投递完 --click 之后才打印布局树，
+::   目的是让 dump 反映点击后的最终状态；布局树的实时坐标以最后一次输出为准
 build\zero-browser.exe --shot --url http://127.0.0.1:8765/video2.html ^
     --out build\shot.bmp --wait 3000 --size 1180x1240 --dump-boxes
 
@@ -271,7 +356,30 @@ build\frame_probe.exe testpage\anim.wmv 2500
 :: 检查本工具链下 std::atomic<double> 的跨线程可见性（见“踩过的坑”）
 g++ -std=c++17 -O2 tools\atomic_double_check.cpp -o build\atomic_check.exe
 build\atomic_check.exe 2000
+
+:: JS：内联与外链脚本、DOM 改写、定时器（无窗口也能跑，定时器由 WM_TIMER 驱动）
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/js.html --out build\js.bmp ^
+    --wait 1500 --size 1100x900 --dump-boxes
+::   期望：[js] 脚本数=1 失败=0，且能看到 item-A/B/C、count=3、interval-ticks=2 等脚本生成内容
+:: 点击按钮（内联 onclick + addEventListener 都会触发）
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/js.html --out build\js2.bmp ^
+    --wait 1200 --size 1100x900 --click 53,459 --dump-boxes
+::   期望：clicks=1 与 clicked-target=BUTTON
+:: 错误隔离：抛错 / 未定义函数 / 死循环之后，后续脚本与页面渲染都必须继续
+build\zero-browser.exe --shot --url http://127.0.0.1:8765/jserr.html --out build\jserr.bmp --wait 2500 --dump-boxes
+::   期望：[js] 脚本数=4 失败=3，第 4 段 ok=1，content_height 正常
+:: 解释器自测（不依赖 DOM）
+g++ -std=c++17 -O2 -Isrc tools\js_probe.cpp src\js.cpp src\js_eval.cpp src\js_builtins.cpp src\js_globals.cpp ^
+    -o build\js_probe.exe -Wl,--stack,8388608
+build\js_probe.exe tools\js_selftest.js
+build\js_probe.exe --robust
 ```
+
+> `--dump-boxes` 现在是**点击之后再打印布局树**（原来是先打印、后点击）。
+> 顺序改了才好用 `--click` 验证事件处理器的效果：`[js] 脚本数=…`、
+> `内联脚本 N ok=…`、`监听器=`、`定时器=` 这些统计都在 dump 之后输出，
+> 页面上看到的文字也必须已经是点击后的内容。想只看点击前的布局，
+> 去掉 `--click` 即可；同一文件里布局修复后旧的盒坐标会失效。
 
 ### 实测结论
 
@@ -289,6 +397,27 @@ build\atomic_check.exe 2000
   的属性选择器只命中文本框（提交按钮保持自适应宽度）
 - Cookie：`--cookie-test` 输出 `echo_body=Cookie: auth=abc123; pref=dark`，`jar_size=2`
 - 网络：显式 `ZB_PROXY=http://127.0.0.1:7890` 可抓取 `http://example.com`
+- **JavaScript**（`--shot` 无窗口实测，脚本内容与布局都按真实路径取证）：
+  - `testpage/js.html`（DOM 改写 + `createElement`/`appendChild` + `forEach` + `JSON` +
+    `setInterval` + 内联 `onclick` + `addEventListener`）：`[js] 脚本数=1 失败=0 监听器=1`，
+    脚本生成的内容全部正常渲染——`item-A` / `item-B` / `item-C`、`count=3`、
+    `joined=A|B|C`、`even-sum=6`、`interval-ticks=2`，`content_height=466`
+  - 点击按钮（`--click 53,459`）后：`clicks=1`（内联 `onclick`）与
+    `clicked-target=BUTTON`（`addEventListener` 里的 `e.target.tagName`）**同时出现**，
+    说明内联属性与监听器都在同一次点击里被派发到了
+  - `testpage/jserr.html`（故意抛错 + 未定义函数 + 死循环 + 后续脚本）：
+    `[js] 脚本数=4 失败=3`，四段依次报
+    `Error: 故意抛出的错误`、`Error: undefined 不是函数`、
+    `Error: 脚本执行步数超限（疑似死循环），已中止`，
+    **第 4 段仍 `ok=1`、页面 `content_height=140` 正常渲染**
+  - `testpage/jsext.html` + `jsext.js`（外链）：`外链脚本 1 ok=1`，
+    页面出现 `外链脚本已执行`、`ext-sum=60`、`ext-flag=true`，监听器=1
+    （该页总共 2 段脚本：外链 + 内联，都是 `ok=1`）
+  - 解释器自测：`tools/js_selftest.js` **139 条断言全过**（`SUMMARY passed=139 failed=0`）；
+    `build\js_probe.exe --robust` **13 条健壮性用例全过**（死循环、无限递归、语法错误、
+    `null` 属性、调用非函数、`catch` 恢复等）
+  - 加了 JS 之后页面回归不受影响：index 577 / images 1861 / grid 467 / forms 469 /
+    flexblocks 233 / video2 864 / position 1200
 - **与 Edge 对标**（同一本地页面、同一窗口宽度，用 `tools/compare_render.py` 比行/列内容带）：
   第一条内容带位置**完全重合**（相对 y 22–40 vs Edge 22–40），后续每段高度差约 6px；
   字号按像素修正前，每行要高出 10–12px（根因是 `font-size` 被当成 pt 折算，见踩坑第 23 条）
@@ -306,6 +435,30 @@ build\atomic_check.exe 2000
 **HTML**
 - 标签/属性解析、注释、DOCTYPE、字符实体（`&amp;` `&lt;` `&#x...`）、void 元素
 - `<title>` / `<style>` / `<script>` / `<textarea>` 原始文本处理，标签与属性名大小写不敏感
+- `<!doctype …>` / `<!-- … -->` / `<![CDATA[…]]>` 声明区整体跳过（大小写不敏感），UTF-8 BOM 自动剥掉
+
+**JavaScript（自研 ES5 子集解释器，不依赖任何第三方引擎）**
+- 语法：`var`/`let`/`const`、函数声明/表达式/箭头函数、闭包、递归、提升、
+  对象/数组字面量与计算属性名、模板字符串（无 `${}` 插值）、
+  `for`/`for-in`/`for-of`/`while`/`do-while`、`switch`、`try`/`catch`/`finally`/`throw`、
+  `break`/`continue`、`++`/`--`/复合赋值、三元、`typeof`/`instanceof`/`in`/`delete`/`void`、
+  位运算、宽松与严格相等
+- 内置：`Object` / `Array` / `String` / `Number` / `Math` / `JSON` / `Date` /
+  `Error` 家族 / `parseInt` / `parseFloat` / `isNaN` / `isFinite` /
+  `String` / `Number` / `Boolean` / `Array` / `Object` / `Function` /
+  `encodeURI(Component)` / `decodeURI(Component)` / `console.*` / `alert`（写脚本日志）
+- DOM：`document` 查询与创建（`getElementById` / `querySelector(All)` / `createElement` …）、
+  元素属性与 `classList` / `style` / `innerHTML` / `textContent` /
+  `appendChild` / `insertBefore` / `removeChild` / `setAttribute` /
+  `getBoundingClientRect` / `offset*`、`window` / `location`、事件（含冒泡）
+- 事件：`addEventListener` 与内联 `onclick="…"`，冒泡到 `document` / `window`，
+  返回 `false` 等价 `preventDefault`，`<a href>` 默认动作导航
+- 定时器：`setTimeout` / `setInterval` / `clearTimeout` / `clearInterval` /
+  `requestAnimationFrame`，外壳 60ms 心跳（`WM_TIMER`）驱动，上限 512 个
+- 脚本：内联与外链 `<script src>`（外链由导航线程与图片并行取回，不阻塞 UI）、
+  按文档顺序执行、首次布局后执行并派发 `DOMContentLoaded` / `load`
+- 隔离：每段脚本单独执行、异常只记录不上抛；死循环由 2000 万步/段预算掐断，
+  无限递归由 200 层调用深度护栏拦住
 
 **字符集**
 - 按 `Content-Type: charset=` 与 `<meta charset>` 自动把 GBK / GB2312 / GB18030 / Big5 /
@@ -381,10 +534,21 @@ build\atomic_check.exe 2000
 
 ## 尚未实现
 
-- **JavaScript**：没有 JS 引擎，`<script>` 一律不执行。SPA 页面只能显示服务端返回的静态
-  HTML；登录、播放、下拉加载等依赖脚本的行为不可用。懒加载缩略图做了静态兜底
-  （`src` 是占位图时回退 `data-src` / `data-original` / `data-lazy-src` / `srcset`）。
-  唯一的例外是**反爬挑战页**：识别「JS 设置 Cookie 后重载」这一固定写法并模拟（洛谷就是靠它进去的）
+- **JavaScript 语言特性**：没有正则表达式（`/.../` 字面量不支持）、没有 `Promise` /
+  `async` / `await`、没有生成器、没有 `class` 语法、没有解构赋值与展开运算符、
+  模板字符串的 `${}` 插值不支持（遇到直接报错）、`Function` 构造器不编译代码、
+  没有块级作用域（`let`/`const` 等价 `var`）。
+  字符串是 **UTF-8 字节语义**（`length` 与下标按字节算，不是 UTF-16），
+  但所有切片操作都会**吸附到码点边界**，所以不会切出乱码。
+  不实现 GC：对象用引用计数，环形引用要等**整页销毁**时才回收。
+  没有 `fetch` / `XMLHttpRequest`，脚本不能主动发请求
+- **DOM 子集**：只实现常用子集，没有 `dataset` / `insertAdjacentHTML` / `cloneNode`、
+  没有事件捕获阶段、`addEventListener` 不支持 `once` / `capture` 选项；
+  `document.cookie` **只读**；`getComputedStyle` 返回 `undefined`；
+  通过 `innerHTML` 插入的 `<style>` **不会生效**
+- **脚本兜底仍保留**：懒加载缩略图的静态兜底（`src` 是占位图时回退 `data-src` /
+  `data-original` / `data-lazy-src` / `srcset`）与**反爬挑战页**（识别「JS 设置 Cookie
+  后重载」这一固定写法并模拟，洛谷就是靠它进去的）都还在，不因有了 JS 而删除
 - **流媒体**：HLS / DASH / m3u8 分片拉流未实现，目前只支持直链媒体文件
 - **表单交互**：控件能渲染，但还不能输入文字、聚焦切换、提交表单（无 `form` 提交与 `Enter` 行为）
 - **CSS 进阶**：`float`、`position: sticky`、`transform`/`transition`/`animation`、
@@ -414,8 +578,21 @@ WinHTTP 传输 ──> html.cpp 解析 ──> DOM 树
                         BitBlt 到窗口（app.cpp 自绘外壳）
 ```
 
+JavaScript 挂在这条链路的**两侧**：脚本在**首次布局完成后**按文档顺序执行，
+通过 `js_dom.cpp` 读写同一棵 DOM 树（改写后重新布局、重绘），
+事件与定时器再由外壳的 60ms `WM_TIMER` 心跳回到解释器：
+
+```
+DOM 树 <── js_dom.cpp（DOM/事件/定时器绑定）<── js_eval.cpp（求值器）
+                                                     ↑
+                                               js.cpp 语法分析
+                                                     ↑
+                                    js_builtins.cpp / js_globals.cpp（内置对象）
+```
+
 - 坐标约定：`屏幕坐标 = 视口原点 + 文档坐标 - 滚动量`；
   命中测试严格使用逆变换，绘制与点击共用同一套换算
+- 命中测试的终点是 **DOM 节点**：按布局树里的 run / 盒反查节点，再把事件交给脚本
 - `--shot` 复用上述真实路径，只是把窗口换成内存 DC，因此取证结果与实际渲染一致
 
 ---
@@ -437,12 +614,18 @@ zero-browser/
     gdi.cpp / gdi.h        自管理画布（32 位 DIB 段）与文字/图片输出
     image.cpp / image.h    WIC 解码图片字节为 BGRA（含 alpha premultiply）
     network.cpp / .h       WinHTTP 传输层：重定向、gzip、字符集归一化、Cookie jar、代理
+    js.cpp                 自研 JS 解释器的词法分析与语法分析
+    js_eval.cpp            求值器：作用域、语句/表达式、调用与步数预算
+    js_builtins.cpp        内置方法表（Object/Array/String/Number/Math/JSON/Date/…）
+    js_globals.cpp         Math/JSON/Date/Error/console 等全局对象
+    js_dom.cpp / js_dom.h  DOM 绑定：document/元素/window/location/事件/定时器
+    js.h / js_internal.h   解释器对外接口与内部接口
     media.cpp / .h         Media Foundation 播放器（解码、时间轴、跳转）
     audio_out.cpp / .h     WASAPI 音频输出
   docs/screenshots/        README 截图（PNG）
-  testpage/                本地验证页面（图片、grid、flex、position、表单、视频、外链 CSS）
+  testpage/                本地验证页面（图片、grid、flex、position、表单、视频、外链 CSS、JS）
   testmedia/               测试片源
-  tools/                   探针与取证工具（含 cookie_server.py）
+  tools/                   探针与取证工具（含 cookie_server.py、js_probe.cpp、js_selftest.js）
 ```
 
 ---
@@ -556,6 +739,28 @@ zero-browser/
     用 `--clipboard "中文"` 这类参数做回归会先被转成 GBK，然后被当成 UTF-8 解释而乱码。
     `--shot` 的无窗口会话里 `GetKeyState` 也恒为 0，所以 `--hotkey` / `--paste`
     必须把修饰键**显式传参**，否则测的根本不是用户按下的那条分支。
+30. **`Env`（作用域链）如果是值语义，闭包捕获的就是快照而不是活绑定。**
+    早期实现里作用域环境按值拷贝，于是 `var total=0; arr.forEach(function(x){ total += x; })`
+    里的 `total` 永远是 0，`for` 循环体里对外层变量的赋值也不算数。
+    修法是让变量表用 `shared_ptr` 持有并对外暴露成引用成员：拷贝一个 `Env`
+    **等于同一作用域的另一个句柄**，写进去的绑定所有闭包都看得见。
+31. **交互式解释器里"抛错本身也要花步数"会造成无限递归。**
+    步数超限后如果继续抛"带 `toString` 的错误对象"，错误格式化会走
+    `CallFunction` → `JsCall` → `BumpSteps`，于是再次超限、再次格式化，形成
+    `CallFunction` → `ToPrimitive` → `ToString` → `CallFunction` 的无限递归
+    （实测直接爆栈，进程崩溃）。修法：超限后**只抛纯字符串值**，
+    并且错误文本用**不回调 JS** 的安全格式化（直接读 `name` / `message` 属性，见 `ErrorText`）。
+32. **`<!doctype html>` 曾被当成正文渲染出来。** 解析器原来只认大写 `<!DOCTYPE`，
+    而真实页面普遍写小写，于是每个页面顶部多出一行文字。
+    修法：对所有 `<!` 开头的声明区（含 `<!-- -->` 与 `<![CDATA[]]>`）都整体跳过，
+    **大小写不敏感**；同时剥掉 **UTF-8 BOM**（记事本"另存为 UTF-8"默认带 BOM，
+    不剥也会把 `<!doctype` 顶成正文）。
+33. **自绘控件是 `TextRun` 而不是 `Box`，命中测试只走盒树就永远点不中按钮。**
+    `NodeAt` 必须同时检查盒内的 run，并把 run 关联的 DOM 节点作为更精确的命中结果返回
+    （本次给 `TextRun` 加了 `node` 字段）；否则 `--click` 与真实点击都派发不到 `<button>` 上。
+34. **剪贴板可能被别的进程占用。** `OpenClipboard` 失败时 `GetLastError` 是 5（拒绝访问），
+    此时连 PowerShell 自己的 `Set-Clipboard` 也会失败。程序必须把这种情况当
+    **"操作失败"如实报告**，而不是崩溃或静默写坏数据。
 
 ---
 

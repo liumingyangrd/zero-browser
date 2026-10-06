@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>DOM 诊断</title></head>
+<body>
+<div id="out">init</div>
+<button id="b">BB</button>
+<input id="i" value="vv">
+<script>
+  var b = document.getElementById('b');
+  var btns = document.querySelectorAll('button');
+  var inputs = document.querySelectorAll('input');
+  var info = 'btn=' + (b ? b.tagName : 'none') +
+             ' btns=' + btns.length +
+             ' inputs=' + inputs.length +
+             ' bodykids=' + document.body.children.length;
+  document.getElementById('out').textContent = info;
+</script>
+</body>
+</html>

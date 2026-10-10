@@ -121,7 +121,7 @@ const char* kAboutHtml = R"HTML(<!DOCTYPE html>
       <tr><td>{{about.rowLayout}}</td><td>{{about.valLayout}}</td></tr>
       <tr><td>{{about.rowTransport}}</td><td>{{about.valTransport}}</td></tr>
       <tr><td>{{about.rowRender}}</td><td>{{about.valRender}}</td></tr>
-      <tr><td>{{about.rowVersion}}</td><td>0.1.6</td></tr>
+      <tr><td>{{about.rowVersion}}</td><td>0.1.7</td></tr>
     </table>
   </div>
 </body></html>
@@ -2612,6 +2612,9 @@ void Page::Relayout(int viewport_w, int viewport_h, Canvas* measurer) {
     if (!root_) return;
     viewport_w_ = viewport_w;
     viewport_h_ = viewport_h;
+
+
+    AttachImages(images_);
     Layout layout(root_.get(), rules_, viewport_w_, viewport_h_);
     root_box_ = layout.Build(measurer);
     if (scroll_y_ > ContentHeight() - 200) scroll_y_ = std::max(0, ContentHeight() - 200);

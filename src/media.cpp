@@ -432,7 +432,7 @@ void MediaPlayer::Impl::Run() {
 
     ready = true;
     MDBG("media: ready %dx%d duration=%.2f audio=%d\n", width.load(),
-         height.load(), duration.load(), has_audio.load() ? 1 : 0);
+         height.load(), GetDuration(), has_audio.load() ? 1 : 0);
     if (playing.load()) StartClock();
 
     

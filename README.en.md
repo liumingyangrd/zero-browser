@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.6-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.7-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -358,8 +358,8 @@ the executable could not be loaded, not that the browser crashed. Check, in orde
 1. **Is the file complete?** In the folder that holds it, verify with PowerShell (size and SHA256
    are on the [Releases](https://github.com/liumingyangrd/zero-browser/releases) page):
    ```powershell
-   $f = ".\zero-browser-v0.1.6-win32.exe"
-   (Get-Item $f).Length                                          # expect 4026457
+   $f = ".\zero-browser-v0.1.7-win32.exe"
+   (Get-Item $f).Length                                          # expect 4023434
    (Get-FileHash $f -Algorithm SHA256).Hash
    [BitConverter]::ToString([IO.File]::ReadAllBytes($f)[0..1])   # expect 4D-5A ("MZ")
    ```

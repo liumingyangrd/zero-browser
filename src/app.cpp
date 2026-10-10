@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include "i18n.h"
+#include "html.h"
 #include "js_dom.h"
 #include "network.h"
 
@@ -601,50 +602,14 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         return true;
     };
 
-    std::string lower = ToLowerAscii(html);
-    size_t pos = 0;
-    while (true) {
-        size_t img = lower.find("<img", pos);
-        if (img == std::string::npos) break;
-        size_t end = lower.find('>', img);
-        if (end == std::string::npos) break;
-        std::string tag = html.substr(img, end - img + 1);
-        
-        
-        std::string src;
-        static const char* kSrcAttrs[] = {
-            "src",           "data-src",       "data-original",
-            "data-lazy-src", "data-actualsrc", "data-original-src",
-            "data-echo"};
-        for (const char* a : kSrcAttrs) {
-            std::string v = Trim(ExtractAttr(tag, a));
-            if (v.empty()) continue;
-            std::string lv = ToLowerAscii(v);
-            if (lv.find("blank.gif") != std::string::npos ||
-                lv.find("placeholder") != std::string::npos ||
-                lv.find("r0lgodlhaqab") != std::string::npos) {
-                continue;
-            }
-            src = v;
-            break;
-        }
-        if (src.empty()) {
-            std::string ss = Trim(ExtractAttr(tag, "data-srcset"));
-            if (ss.empty()) ss = Trim(ExtractAttr(tag, "srcset"));
-            if (!ss.empty()) {
-                size_t comma = ss.find(',');
-                std::string first = Trim(ss.substr(0, comma));
-                size_t sp = first.find(' ');
-                src = sp == std::string::npos ? first : first.substr(0, sp);
-            }
-        }
-        pos = end + 1;
-        if (src.empty()) continue;
-        std::string abs = ResolveUrl(base_url, src);
-        if (out.count(abs)) continue;
 
+    auto document = zb::ParseHtml(html);
+    auto load_source = [&](const std::string& src) {
+        if (src.empty()) return;
+        std::string abs = ResolveUrl(base_url, src);
+        if (out.count(abs)) return;
         std::shared_ptr<Image> image;
-        if (StartsWith(src, "data:image/")) {
+        if (StartsWith(ToLowerAscii(src), "data:image/")) {
             size_t comma = src.find(',');
             if (comma != std::string::npos) {
                 image = DecodeImage(Base64Decode(src.substr(comma + 1)));
@@ -652,70 +617,64 @@ void LoadImagesForHtml(const std::string& html, const std::string& base_url,
         } else if (StartsWith(abs, "file://")) {
             std::string path = abs.substr(7);
             if (path.size() > 2 && (path[0] == '/' || path[0] == '\\') &&
-                path[2] == ':') {
-                path = path.substr(1);
-            }
-            path = PercentDecode(path);
-            std::string bytes = ReadFileBinary(path);
+                path[2] == ':') path = path.substr(1);
+            std::string bytes = ReadFileBinary(PercentDecode(path));
             if (!bytes.empty()) image = DecodeImage(bytes);
         } else {
             need_remote(abs);
         }
-
         if (image) {
             image->source_url = abs;
             out[abs] = std::move(image);
         }
-    }
+    };
+    auto scan_css = [&](const std::string& css) {
+        std::string lower = ToLowerAscii(css);
+        size_t pos = 0;
+        while (pos < css.size()) {
 
-    
-    
-    std::string lower_all = ToLowerAscii(html);
-    pos = 0;
-    while (true) {
-        size_t up = lower_all.find("url(", pos);
-        if (up == std::string::npos) break;
-        size_t open = html.find('(', up);
-        if (open == std::string::npos) break;
-        size_t close = html.find(')', open);
-        if (close == std::string::npos) break;
-        std::string u = html.substr(open + 1, close - open - 1);
-        pos = close + 1;
-        if (u.size() >= 2 &&
-            ((u.front() == '"' && u.back() == '"') ||
-             (u.front() == '\'' && u.back() == '\''))) {
-            u = u.substr(1, u.size() - 2);
+            if (css.compare(pos, 2, "/*") == 0) {
+                size_t end = css.find("*/", pos + 2);
+                if (end == std::string::npos) break;
+                pos = end + 2;
+                continue;
+            }
+            if (lower.compare(pos, 4, "url(") != 0) {
+                ++pos;
+                continue;
+            }
+            size_t start = pos + 4;
+            size_t close = css.find(')', start);
+            if (close == std::string::npos) break;
+            std::string url = Trim(css.substr(start, close - start));
+            pos = close + 1;
+            if (url.size() >= 2 &&
+                ((url.front() == '\"' && url.back() == '\"') ||
+                 (url.front() == '\'' && url.back() == '\''))) {
+                url = url.substr(1, url.size() - 2);
+            }
+            if (!url.empty() && url.front() != '#') load_source(url);
         }
-        u = Trim(u);
-        if (u.empty() || StartsWith(u, "data:")) continue;
-        std::string abs = ResolveUrl(base_url, u);
-        if (out.count(abs)) continue;
-        if (StartsWith(abs, "file://")) {
-            std::string path = abs.substr(7);
-            if (path.size() > 2 && (path[0] == '/' || path[0] == '\\') &&
-                path[2] == ':') {
-                path = path.substr(1);
-            }
-            path = PercentDecode(path);
-            std::string bytes = ReadFileBinary(path);
-            if (!bytes.empty()) {
-                auto image = DecodeImage(bytes);
-                if (image) {
-                    image->source_url = abs;
-                    out[abs] = std::move(image);
-                }
-            }
-        } else {
-            need_remote(abs);
+    };
+    std::vector<const Node*> stack{document.get()};
+    while (!stack.empty()) {
+        const Node* node = stack.back();
+        stack.pop_back();
+        if (node->type == NodeType::Element) {
+            if (node->tag == "img") load_source(ImageSourceOf(node));
+            if (node->tag == "style") scan_css(NodeText(node));
+            scan_css(node->Attr("style"));
+        }
+
+        for (auto it = node->children.rbegin(); it != node->children.rend(); ++it) {
+            stack.push_back(it->get());
         }
     }
 
     if (remote.empty()) return;
     std::vector<FetchResult> results;
     
-    
-    
-    FetchManyParallel(remote, 12, &results, 10000, true, base_url);
+    FetchManyParallel(remote, 16, &results, 15000, true, base_url);
     for (size_t i = 0; i < remote.size() && i < results.size(); ++i) {
         if (results[i].html.empty()) continue;
         auto image = DecodeImage(results[i].html);
@@ -2941,4 +2900,4 @@ void BrowserApp::NavigateTo(const std::string& url, bool add_history) {
     StartNavigate(url, add_history);
 }
 
-}  
+}

@@ -1,7 +1,7 @@
 # Zero Browser
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.1.6-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.7-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20Win32-lightgrey.svg)
 ![Language](https://img.shields.io/badge/C%2B%2B-17-00599C.svg)
 
@@ -328,8 +328,8 @@ python tools\form_server.py 8902
 1. **文件是不是完整的？** 在文件所在目录用 PowerShell 核对（大小与 SHA256 见
    [Releases](https://github.com/liumingyangrd/zero-browser/releases) 页面）：
    ```powershell
-   $f = ".\zero-browser-v0.1.6-win32.exe"
-   (Get-Item $f).Length                                          # 应为 4026457
+   $f = ".\zero-browser-v0.1.7-win32.exe"
+   (Get-Item $f).Length                                          # 应为 4023434
    (Get-FileHash $f -Algorithm SHA256).Hash
    [BitConverter]::ToString([IO.File]::ReadAllBytes($f)[0..1])   # 应为 4D-5A（"MZ"）
    ```

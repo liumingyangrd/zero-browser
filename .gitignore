@@ -9,7 +9,8 @@ build/
 *.pdb
 *.exp
 
-# 取证用的位图（截图已转成 docs/screenshots/*.png 入库）
+# 截图文件，不随仓库提交
+docs/
 *.bmp
 
 # 内部交接文档，不随仓库发布

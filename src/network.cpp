@@ -358,7 +358,7 @@ HINTERNET AcquireSession(DWORD access_type, const wchar_t* named_proxy,
         cache.handle = nullptr;
     }
     HINTERNET session = WinHttpOpen(
-        L"ZeroBrowser/0.1.6 (self-built engine; system TLS transport)",
+        L"ZeroBrowser/0.1.7 (self-built engine; system TLS transport)",
         access_type, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) return nullptr;
     if (named_proxy && *named_proxy) {
@@ -368,8 +368,8 @@ HINTERNET AcquireSession(DWORD access_type, const wchar_t* named_proxy,
         proxy.lpszProxyBypass = nullptr;
         WinHttpSetOption(session, WINHTTP_OPTION_PROXY, &proxy, sizeof(proxy));
     }
-    WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms,
-                       timeout_ms * 2);
+
+    WinHttpSetTimeouts(session, timeout_ms, timeout_ms * 2, timeout_ms, timeout_ms * 3);
     cache.handle = session;
     cache.proxy = want;
     cache.access = access_type;
@@ -392,8 +392,7 @@ bool FetchOnce(const std::string& url, FetchResult* result, int timeout_ms,
         result->error = Win32Error("WinHttpOpen 失败");
         return false;
     }
-    WinHttpSetTimeouts(session, timeout_ms, timeout_ms, timeout_ms,
-                       timeout_ms * 2);
+    WinHttpSetTimeouts(session, timeout_ms, timeout_ms * 2, timeout_ms, timeout_ms * 3);
 
     wchar_t host[512] = {};
     wchar_t path[4096] = {};
@@ -708,4 +707,4 @@ void CookieJarAbsorbText(const std::string& url,
     AbsorbSetCookie(url, set_cookie);
 }
 
-}  
+}
